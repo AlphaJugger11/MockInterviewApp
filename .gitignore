@@ -1,25 +1,16 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+#Ignore build artifacts and downloaded code
+deploy-package.zip
+project-bolt-sb1-vhnjvcwc.zip
+project-bolt-sb1-vhnjvcwc_backend.zip
+temp/
+tmp/
 
-node_modules
-dist
-dist-ssr
-*.local
+# Ignore personal notes and credentials
+developer-user_credentials.csv
+hackathonPrompt.txt
+HackathonSecrets.md
+Timeline.txt
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.env
+# Ignore IDE/OS files
+.vscode/
+.idea/
