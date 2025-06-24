@@ -92,7 +92,7 @@ export const createConversation = async (
       'https://tavusapi.com/v2/conversations',
       {
         replica_id: TAVUS_REPLICA_ID,
-        persona_instructions: persona_instructions,
+        conversational_context: persona_instructions, // <-- changed here
       },
       {
         headers: { 
