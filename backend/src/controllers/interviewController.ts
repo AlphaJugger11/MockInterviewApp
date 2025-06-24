@@ -93,6 +93,12 @@ export const createConversation = async (
       {
         replica_id: TAVUS_REPLICA_ID,
         conversational_context: persona_instructions, // <-- changed here
+        properties: {
+             max_call_duration: 300, //  5 minutes max call duration change to 20 minutes after testing
+             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
+             participant_left_timeout: 15, // Set timeout after participant leaves (e.g., 60 seconds)
+
+        }
       },
       {
         headers: { 
