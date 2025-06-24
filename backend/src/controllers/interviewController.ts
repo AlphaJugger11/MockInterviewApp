@@ -8,7 +8,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 // Helper function to generate persona instructions using Gemini
 const generatePersonaInstructions = async (jobTitle: string): Promise<string> => {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     
     const prompt = `You are an expert career coach and hiring manager. Your task is to generate a comprehensive set of "persona_instructions" for another AI that will conduct a mock interview. The user is practicing for a '${jobTitle}' role. The instructions must be detailed, including a friendly but professional opening, a mix of 5-7 behavioral and technical questions relevant to the role, and an encouraging closing statement. The questions must be unique and varied for each generation to prevent repetition. Do not use markdown.`;
     
