@@ -23,9 +23,9 @@ A robust Node.js backend API for the Ascend AI interview coaching platform, buil
 
 ### Installation
 
-1. Navigate to the server directory:
+1. Navigate to the backend directory:
 ```bash
-cd server
+cd backend
 ```
 
 2. Install dependencies:
