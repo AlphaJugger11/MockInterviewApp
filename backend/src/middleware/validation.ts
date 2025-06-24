@@ -8,6 +8,58 @@ interface InterviewStartRequest {
   selectedPreset?: string;
 }
 
+interface ConversationRequest {
+  jobTitle: string;
+  customInstructions?: string;
+  customCriteria?: string;
+}
+
+export const validateConversationRequest = (
+  req: Request<{}, {}, ConversationRequest>,
+  res: Response,
+  next: NextFunction
+): void => {
+  const { jobTitle, customInstructions, customCriteria } = req.body;
+
+  // Validate required fields
+  if (!jobTitle || typeof jobTitle !== 'string' || jobTitle.trim().length === 0) {
+    res.status(400).json({
+      success: false,
+      error: 'Job title is required and must be a non-empty string',
+    });
+    return;
+  }
+
+  // Validate job title length
+  if (jobTitle.length > 100) {
+    res.status(400).json({
+      success: false,
+      error: 'Job title must be 100 characters or less',
+    });
+    return;
+  }
+
+  // Validate custom instructions length
+  if (customInstructions && customInstructions.length > 5000) {
+    res.status(400).json({
+      success: false,
+      error: 'Custom instructions must be 5000 characters or less',
+    });
+    return;
+  }
+
+  // Validate custom criteria length
+  if (customCriteria && customCriteria.length > 2000) {
+    res.status(400).json({
+      success: false,
+      error: 'Custom criteria must be 2000 characters or less',
+    });
+    return;
+  }
+
+  next();
+};
+
 export const validateInterviewRequest = (
   req: Request<{}, {}, InterviewStartRequest>,
   res: Response,

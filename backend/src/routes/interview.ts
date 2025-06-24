@@ -1,10 +1,13 @@
 import express from 'express';
-import { startInterview } from '../controllers/interviewController';
-import { validateInterviewRequest } from '../middleware/validation';
+import { startInterview, createConversation } from '../controllers/interviewController';
+import { validateInterviewRequest, validateConversationRequest } from '../middleware/validation';
 
 const router = express.Router();
 
-// POST /api/interview/start
+// POST /api/interview/create-conversation - New dynamic persona endpoint
+router.post('/create-conversation', validateConversationRequest, createConversation);
+
+// POST /api/interview/start - Legacy endpoint
 router.post('/start', validateInterviewRequest, startInterview);
 
 // GET /api/interview/status/:sessionId (placeholder for future use)

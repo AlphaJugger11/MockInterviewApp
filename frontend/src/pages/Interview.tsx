@@ -1,108 +1,334 @@
-// project/src/pages/Interview.tsx
-
-import React, { useState, useEffect, useRef } from 'react'; // --- MODIFIED: Added useEffect and useRef ---
-import { useNavigate } from 'react-router-dom'; // Keep this
-import { SkipForward, Square, Mic, MicOff, Video, VideoOff } from 'lucide-react'; // Keep this
-// --- NOTE: We are removing Layout since this page is full-screen ---
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { SkipForward, Square, Mic, MicOff, Video, VideoOff, Download } from 'lucide-react';
 
 const Interview = () => {
-  const navigate = useNavigate(); // Keep this
-  const [currentQuestion, setCurrentQuestion] = useState(0); // Keep this
-  const [isMuted, setIsMuted] = useState(false); // Keep this
-  const [isVideoOn, setIsVideoOn] = useState(true); // Keep this
+  const navigate = useNavigate();
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOn, setIsVideoOn] = useState(true);
+  const [conversationUrl, setConversationUrl] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
-  // --- NEW: Add state for the AI Interviewer's video URL and question text ---
-  const [aiVideoUrl, setAiVideoUrl] = useState<string | null>(null);
-  const [aiQuestion, setAiQuestion] = useState('Your interviewer is preparing the first question...');
-  
-  // --- NEW: Create a ref to access the video element directly ---
-  const aiVideoRef = useRef<HTMLVideoElement>(null);
+  // Recording refs and state
   const userVideoRef = useRef<HTMLVideoElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  // --- NEW: This effect runs once when the page loads ---
   useEffect(() => {
-    // 1. Get the video URL saved by the Setup page
-    const url = localStorage.getItem('aiVideoUrl');
+    // Get the conversation URL from localStorage
+    const url = localStorage.getItem('conversationUrl');
     if (url) {
-      setAiVideoUrl(url);
+      setConversationUrl(url);
     } else {
-      // Handle case where user lands here directly
-      console.error("No AI video URL found. Navigating back to setup.");
+      console.error("No conversation URL found. Navigating back to setup.");
       navigate('/setup');
+      return;
     }
 
-    // 2. Get access to the user's webcam
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
+    // Initialize user media and recording
+    const initializeMedia = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: true 
+        });
+        
+        streamRef.current = stream;
+        
         if (userVideoRef.current) {
           userVideoRef.current.srcObject = stream;
         }
-      })
-      .catch(err => {
+
+        // Initialize MediaRecorder
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'video/webm;codecs=vp9'
+        });
+        
+        mediaRecorderRef.current = mediaRecorder;
+        recordedChunksRef.current = [];
+
+        // Handle data available event
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            recordedChunksRef.current.push(event.data);
+          }
+        };
+
+        // Start recording
+        mediaRecorder.start(1000); // Record in 1-second chunks
+        setIsRecording(true);
+        console.log('Recording started');
+
+      } catch (err) {
         console.error("Failed to get user media:", err);
-        // You could show an error message to the user here
+      }
+    };
+
+    initializeMedia();
+
+    // Cleanup function
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [navigate]);
+
+  // Function to trigger download
+  const triggerDownload = () => {
+    if (recordedChunksRef.current.length === 0) {
+      console.log('No recorded data to download');
+      return;
+    }
+
+    try {
+      // Stop recording if still active
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+
+      // Create blob and download
+      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+      
+      document.body.appendChild(a);
+      a.click();
+      
+      // Cleanup
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log('Download triggered successfully');
+    } catch (error) {
+      console.error('Error triggering download:', error);
+    }
+  };
+
+  // Handle automatic download on page unload/crash
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      triggerDownload();
+      // Optional: Show confirmation dialog
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
+  const handleEndSession = () => {
+    setIsRecording(false);
+    
+    // Stop recording and trigger download
+    triggerDownload();
+    
+    // Stop all media tracks
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    // Navigate to feedback page after a short delay to ensure download starts
+    setTimeout(() => {
+      navigate('/feedback/1');
+    }, 1000);
+  };
+
+  const toggleMute = () => {
+    if (streamRef.current) {
+      const audioTracks = streamRef.current.getAudioTracks();
+      audioTracks.forEach(track => {
+        track.enabled = isMuted;
       });
-  }, [navigate]); // navigate is a stable function, so this still runs only once
+      setIsMuted(!isMuted);
+    }
+  };
 
-  // --- MODIFIED: The old hardcoded questions array is no longer needed ---
-  // const questions = [ ... ]; // This can be deleted
-
-  const handleEndSession = () => { /* ... Keep this function as is ... */ };
+  const toggleVideo = () => {
+    if (streamRef.current) {
+      const videoTracks = streamRef.current.getVideoTracks();
+      videoTracks.forEach(track => {
+        track.enabled = !isVideoOn;
+      });
+      setIsVideoOn(!isVideoOn);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-light-primary dark:bg-dark-primary">
-      {/* ... Keep the Header as is ... */}
+      {/* Header */}
+      <div className="bg-light-secondary dark:bg-dark-secondary border-b border-light-border dark:border-dark-border">
+        <div className="max-w-8xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-4">
+              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+              <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
+                Live Interview Session
+              </span>
+              {isRecording && (
+                <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
+                  Recording...
+                </span>
+              )}
+            </div>
+            <button
+              onClick={handleEndSession}
+              className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+            >
+              <Square className="h-4 w-4 mr-2" />
+              End Session
+            </button>
+          </div>
+        </div>
+      </div>
       
       <div className="max-w-6xl mx-auto p-8">
         <div className="grid lg:grid-cols-3 gap-8 h-full">
           {/* Main Video Area */}
           <div className="lg:col-span-2 space-y-6">
-            {/* --- MODIFIED: User Video now uses a ref to get the live stream --- */}
+            {/* User Video */}
             <div className="relative bg-black rounded-2xl overflow-hidden aspect-video">
-              <video ref={userVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-              {/* ... Keep the video controls section as is ... */}
+              <video 
+                ref={userVideoRef} 
+                autoPlay 
+                playsInline 
+                muted 
+                className="w-full h-full object-cover" 
+              />
+              
+              {/* Video Controls Overlay */}
+              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+                <div className="flex items-center space-x-4 bg-black/50 backdrop-blur-sm rounded-full px-6 py-3">
+                  <button
+                    onClick={toggleMute}
+                    className={`p-3 rounded-full transition-colors ${
+                      isMuted 
+                        ? 'bg-red-500 hover:bg-red-600' 
+                        : 'bg-white/20 hover:bg-white/30'
+                    }`}
+                  >
+                    {isMuted ? (
+                      <MicOff className="h-5 w-5 text-white" />
+                    ) : (
+                      <Mic className="h-5 w-5 text-white" />
+                    )}
+                  </button>
+                  
+                  <button
+                    onClick={toggleVideo}
+                    className={`p-3 rounded-full transition-colors ${
+                      !isVideoOn 
+                        ? 'bg-red-500 hover:bg-red-600' 
+                        : 'bg-white/20 hover:bg-white/30'
+                    }`}
+                  >
+                    {!isVideoOn ? (
+                      <VideoOff className="h-5 w-5 text-white" />
+                    ) : (
+                      <Video className="h-5 w-5 text-white" />
+                    )}
+                  </button>
+
+                  <button
+                    onClick={triggerDownload}
+                    className="p-3 rounded-full bg-white/20 hover:bg-white/30 transition-colors"
+                    title="Download Recording"
+                  >
+                    <Download className="h-5 w-5 text-white" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* --- MODIFIED: AI Avatar now contains the real video element --- */}
+            {/* AI Interviewer */}
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
                 AI Interviewer
               </h3>
-              <div className="bg-black rounded-full mx-auto mb-4 w-24 h-24 overflow-hidden">
-                {aiVideoUrl ? (
-                  <video
-                    ref={aiVideoRef}
-                    src={aiVideoUrl}
-                    autoPlay
-                    playsInline
-                    className="w-full h-full object-cover"
-                    onLoadedData={() => setAiQuestion('Tell me about a time you faced a difficult challenge at work.')} // Mock question display
-                    onEnded={() => console.log('AI finished speaking')}
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-light-accent to-blue-600 dark:from-dark-accent dark:to-green-400 flex items-center justify-center">
-                    <div className="w-12 h-12 bg-white/20 rounded-full animate-pulse"></div>
+              
+              {conversationUrl ? (
+                <div className="space-y-4">
+                  <div className="bg-black rounded-lg aspect-video">
+                    <iframe
+                      src={conversationUrl}
+                      className="w-full h-full rounded-lg"
+                      allow="camera; microphone"
+                      title="AI Interviewer"
+                    />
                   </div>
-                )}
-              </div>
-              <p className="text-center text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                {aiVideoUrl ? 'Sarah is speaking...' : 'Sarah is connecting...'}
-              </p>
+                  <p className="text-center text-sm text-light-text-secondary dark:text-dark-text-secondary">
+                    Your AI interviewer is ready to begin
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="w-12 h-12 bg-white/20 rounded-full animate-pulse mx-auto mb-4"></div>
+                    <p className="text-white/70">Loading interviewer...</p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* --- MODIFIED: Current Question now uses state --- */}
+            {/* Interview Controls */}
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-                Current Question
+                Interview Controls
               </h3>
-              <p className="font-inter text-light-text-primary dark:text-dark-text-primary leading-relaxed">
-                {aiQuestion}
-              </p>
+              <div className="space-y-3">
+                <button className="w-full flex items-center justify-center px-4 py-3 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity">
+                  <SkipForward className="h-4 w-4 mr-2" />
+                  Next Question
+                </button>
+                <button 
+                  onClick={triggerDownload}
+                  className="w-full flex items-center justify-center px-4 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Recording
+                </button>
+              </div>
             </div>
-            {/* ... Keep the Interview Controls and Session Info sections as they are ... */}
+
+            {/* Session Info */}
+            <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
+              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
+                Session Info
+              </h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Status:</span>
+                  <span className="text-green-500 font-medium">
+                    {isRecording ? 'Recording' : 'Ready'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Duration:</span>
+                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
+                    {Math.floor(Date.now() / 60000) % 60}:00
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Questions:</span>
+                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
+                    {currentQuestion + 1} / 5
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

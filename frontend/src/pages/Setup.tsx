@@ -1,8 +1,6 @@
-// project/src/pages/Setup.tsx
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Target, MessageSquare, BarChart3, Loader2 } from 'lucide-react';
+import { ArrowRight, Target, MessageSquare, BarChart3, Loader2, User } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const Setup = () => {
@@ -12,6 +10,8 @@ const Setup = () => {
   const [questionType, setQuestionType] = useState('preset');
   const [customPrompt, setCustomPrompt] = useState('');
   const [selectedPreset, setSelectedPreset] = useState('');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [customCriteria, setCustomCriteria] = useState('');
   const [feedbackMetrics, setFeedbackMetrics] = useState({
     answerStructure: true,
     speechDelivery: true,
@@ -32,50 +32,38 @@ const Setup = () => {
     { value: 'devops', label: 'DevOps Engineering' },
   ];
 
-  const pollForVideo = async (videoId: string): Promise<string> => {
-    for (let i = 0; i < 40; i++) {
-      try {
-        const statusResponse = await fetch(`http://localhost:3001/api/interview/status/${videoId}`);
-        if (!statusResponse.ok) throw new Error('Failed to get video status.');
-        const data = await statusResponse.json();
-
-        console.log(`Polling attempt ${i + 1}: Status is '${data.status}'`);
-        if (data.status === 'completed') return data.hosted_url;
-        if (data.status === 'error') throw new Error('Tavus video generation failed.');
-        
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      } catch (err) {
-        console.error("Polling error:", err);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-    }
-    throw new Error('Video generation timed out.');
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
 
     try {
-      const startResponse = await fetch('http://localhost:3001/api/interview/start', {
+      console.log('Creating conversation with:', { jobTitle, customInstructions, customCriteria });
+      
+      const response = await fetch('http://localhost:3001/api/interview/create-conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobTitle, customPrompt }),
+        body: JSON.stringify({ 
+          jobTitle, 
+          customInstructions, 
+          customCriteria 
+        }),
       });
 
-      if (!startResponse.ok) {
-        const errorData = await startResponse.json();
-        throw new Error(errorData.message || 'Failed to initiate interview session.');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create interview conversation.');
       }
       
-      const { videoId } = await startResponse.json();
-      const finalVideoUrl = await pollForVideo(videoId);
+      const { conversation_url } = await response.json();
+      console.log('Conversation created successfully:', conversation_url);
       
-      localStorage.setItem('aiVideoUrl', finalVideoUrl);
+      // Store the conversation URL for the interview page
+      localStorage.setItem('conversationUrl', conversation_url);
       navigate('/interview');
 
     } catch (err) {
+      console.error('Error creating conversation:', err);
       setError(err instanceof Error ? err.message : "An unknown error occurred.");
     } finally {
       setIsLoading(false);
@@ -102,17 +90,40 @@ const Setup = () => {
           {/* Step 1: Basics */}
           <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
             <div className="flex items-center space-x-3 mb-6">
-              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center"><Target className="h-4 w-4 text-white" /></div>
-              <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">Step 1: Interview Basics</h2>
+              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                <Target className="h-4 w-4 text-white" />
+              </div>
+              <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">
+                Step 1: Interview Basics
+              </h2>
             </div>
             <div className="grid md:grid-cols-2 gap-6">
               <div>
-                <label htmlFor="jobTitle" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">Target Job Title *</label>
-                <input type="text" id="jobTitle" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary focus:outline-none" placeholder="e.g., Senior Frontend Developer" required />
+                <label htmlFor="jobTitle" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Target Job Title *
+                </label>
+                <input 
+                  type="text" 
+                  id="jobTitle" 
+                  value={jobTitle} 
+                  onChange={(e) => setJobTitle(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="e.g., Senior Frontend Developer" 
+                  required 
+                />
               </div>
               <div>
-                <label htmlFor="company" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">Target Company</label>
-                <input type="text" id="company" value={company} onChange={(e) => setCompany(e.target.value)} className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary focus:outline-none" placeholder="e.g., Netflix" />
+                <label htmlFor="company" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Target Company
+                </label>
+                <input 
+                  type="text" 
+                  id="company" 
+                  value={company} 
+                  onChange={(e) => setCompany(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="e.g., Netflix" 
+                />
               </div>
             </div>
           </div>
@@ -120,10 +131,99 @@ const Setup = () => {
           {/* Step 2: Questions */}
           <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
             <div className="flex items-center space-x-3 mb-6">
-                <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center"><MessageSquare className="h-4 w-4 text-white" /></div>
-                <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">Step 2: Interview Questions</h2>
+              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                <MessageSquare className="h-4 w-4 text-white" />
+              </div>
+              <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">
+                Step 2: Interview Questions
+              </h2>
             </div>
-            <textarea id="customPrompt" rows={4} value={customPrompt} onChange={(e) => setCustomPrompt(e.target.value)} className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary focus:outline-none" placeholder="Optional: Enter your own question or prompt for the AI..."/>
+            <textarea 
+              id="customPrompt" 
+              rows={4} 
+              value={customPrompt} 
+              onChange={(e) => setCustomPrompt(e.target.value)} 
+              className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+              placeholder="Optional: Enter your own question or prompt for the AI..."
+            />
+          </div>
+
+          {/* Step 3: Customize Your Interviewer */}
+          <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
+            <div className="flex items-center space-x-3 mb-6">
+              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                <User className="h-4 w-4 text-white" />
+              </div>
+              <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">
+                Step 3: Customize Your Interviewer
+              </h2>
+            </div>
+            
+            <div className="space-y-6">
+              <div>
+                <label htmlFor="customInstructions" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Custom Persona Instructions
+                </label>
+                <textarea 
+                  id="customInstructions" 
+                  rows={6} 
+                  value={customInstructions} 
+                  onChange={(e) => setCustomInstructions(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="Optional: Define your AI's personality, the questions it should ask, and its overall goal. Leave blank to auto-generate based on your job title using AI..."
+                />
+                <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
+                  If left empty, our AI will automatically generate personalized instructions based on your job title.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="customCriteria" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Custom Judgment Criteria
+                </label>
+                <textarea 
+                  id="customCriteria" 
+                  rows={3} 
+                  value={customCriteria} 
+                  onChange={(e) => setCustomCriteria(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="Optional: List specific things you want to be judged on (e.g., technical depth, leadership examples, problem-solving approach)..."
+                />
+                <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
+                  These will be combined with our standard evaluation criteria (STAR method, clarity, confidence).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 4: Feedback Metrics */}
+          <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
+            <div className="flex items-center space-x-3 mb-6">
+              <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                <BarChart3 className="h-4 w-4 text-white" />
+              </div>
+              <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">
+                Step 4: Feedback Metrics
+              </h2>
+            </div>
+            
+            <div className="grid md:grid-cols-3 gap-4">
+              {Object.entries(feedbackMetrics).map(([key, value]) => (
+                <label key={key} className="flex items-center space-x-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={value}
+                    onChange={() => toggleMetric(key as keyof typeof feedbackMetrics)}
+                    className="w-5 h-5 text-light-accent dark:text-dark-accent bg-light-primary dark:bg-dark-primary border-light-border dark:border-dark-border rounded focus:ring-light-accent dark:focus:ring-dark-accent focus:ring-2"
+                  />
+                  <span className="font-inter text-light-text-primary dark:text-dark-text-primary">
+                    {key === 'answerStructure' && 'Answer Structure'}
+                    {key === 'speechDelivery' && 'Speech Delivery'}
+                    {key === 'bodyLanguage' && 'Body Language'}
+                  </span>
+                </label>
+              ))}
+            </div>
           </div>
 
           {/* Error Message Display */}
@@ -135,11 +235,21 @@ const Setup = () => {
 
           {/* Submit Button */}
           <div className="flex justify-end">
-            <button type="submit" disabled={isLoading} className="inline-flex items-center justify-center px-8 py-4 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">
+            <button 
+              type="submit" 
+              disabled={isLoading || !jobTitle.trim()} 
+              className="inline-flex items-center justify-center px-8 py-4 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               {isLoading ? (
-                <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Generating...</>
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Creating Interview...
+                </>
               ) : (
-                <>Begin Interview <ArrowRight className="ml-2 h-5 w-5" /></>
+                <>
+                  Begin Interview 
+                  <ArrowRight className="ml-2 h-5 w-5" />
+                </>
               )}
             </button>
           </div>
