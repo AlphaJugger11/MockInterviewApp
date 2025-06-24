@@ -1,90 +1,77 @@
-// src/controllers/interviewController.ts
+// src/pages/Setup.tsx
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+// ... other imports from your project
 
-import dotenv from 'dotenv';
-import path from 'path';
-import { Request, Response, NextFunction } from 'express';
-import axios from 'axios';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+const Setup = () => {
+  const navigate = useNavigate();
+  const [jobTitle, setJobTitle] = useState('');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-// --- HELPER FUNCTION TO GENERATE INSTRUCTIONS ---
-const generateInstructionsWithGemini = async (jobTitle: string): Promise<string> => {
-  try {
-    // Initialize Gemini AI here to ensure API key is loaded
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Using a reliable model
-    
-    const prompt = `You are an expert career coach. Generate instructions for an AI interviewer. The user is practicing for a '${jobTitle}' role. Include a friendly opening, 5-7 relevant behavioral and technical questions, and a closing statement. The questions must be unique. Do not use markdown.`;
-    
-    const result = await model.generateContent(prompt);
-    return result.response.text();
-  } catch (error) {
-    console.error('⚠️ Gemini API failed, using fallback instructions.', error);
-    return `Hello! I'm ready to conduct your mock interview for the ${jobTitle} role. Let's begin with this question: Tell me about yourself and why you're interested in this role.`;
-  }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch('http://localhost:3001/api/interview/create-conversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Send the user's input to the backend
+        body: JSON.stringify({ jobTitle, customInstructions }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create conversation session.');
+      }
+
+      const { conversationUrl } = await response.json();
+      localStorage.setItem('conversationUrl', conversationUrl);
+      navigate('/interview');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unknown error occurred.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    // Your full, styled JSX for the form goes here.
+    // Ensure you have an <input> that sets the 'jobTitle'
+    // and a <textarea> that sets the 'customInstructions'.
+    // Here is a basic functional example:
+    <div style={{ padding: '2rem', color: 'white', background: '#121212', minHeight: '100vh' }}>
+      <h1>Set Up Your Mock Interview</h1>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '500px' }}>
+        <div>
+          <label>Job Title You're Practicing For *</label>
+          <input 
+            type="text" 
+            value={jobTitle} 
+            onChange={(e) => setJobTitle(e.target.value)} 
+            required 
+            style={{ width: '100%', padding: '8px', background: '#333', border: '1px solid #555', borderRadius: '4px', color: 'white' }}
+          />
+        </div>
+        <div>
+          <label>Custom Instructions (Optional)</label>
+          <textarea 
+            rows={5}
+            value={customInstructions} 
+            onChange={(e) => setCustomInstructions(e.target.value)} 
+            placeholder="Optional: Define the AI's personality, questions, etc."
+            style={{ width: '100%', padding: '8px', background: '#333', border: '1px solid #555', borderRadius: '4px', color: 'white' }}
+          />
+        </div>
+        {error && <p style={{ color: 'red' }}>Error: {error}</p>}
+        <button type="submit" disabled={isLoading} style={{ padding: '10px', background: 'green', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          {isLoading ? 'Initializing...' : 'Begin Interview'}
+        </button>
+      </form>
+    </div>
+  );
 };
 
-
-// --- THE MAIN CONTROLLER FUNCTION ---
-export const createConversation = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    // Step 1: Reliably load environment variables
-    dotenv.config({ path: path.resolve(__dirname, '..', '..', '.env') });
-    const TAVUS_API_KEY = process.env.TAVUS_API_KEY;
-    const TAVUS_REPLICA_ID = process.env.TAVUS_REPLICA_ID;
-    if (!TAVUS_API_KEY || !TAVUS_REPLICA_ID || !process.env.GEMINI_API_KEY) {
-      throw new Error('One or more required API keys are missing from the .env file.');
-    }
-
-    const { jobTitle, customInstructions } = req.body;
-    if (!jobTitle) {
-      throw new Error("Job title is required to create an interview.");
-    }
-    
-    // Step 2: Generate the dynamic persona instructions
-    let personaInstructions: string;
-    if (customInstructions) {
-      console.log("✅ Using custom instructions from user.");
-      personaInstructions = customInstructions;
-    } else {
-      console.log(`✅ No custom instructions. Calling Gemini for a '${jobTitle}' role...`);
-      personaInstructions = await generateInstructionsWithGemini(jobTitle);
-    }
-
-    // Step 3 (NEW): Create a new, temporary persona via the Tavus API
-    console.log("✅ Creating a new dynamic persona on Tavus...");
-    const personaResponse = await axios.post(
-      'https://tavusapi.com/v2/personas',
-      {
-        name: `Dynamic Persona - ${jobTitle} - ${Date.now()}`,
-        instructions: personaInstructions,
-      },
-      { headers: { 'x-api-key': TAVUS_API_KEY } }
-    );
-    const newPersonaId = personaResponse.data.persona_id;
-    console.log(`✅ Successfully created temporary persona with ID: ${newPersonaId}`);
-
-    // Step 4: Use the NEW persona_id to create the conversation
-    console.log("✅ Creating conversation using the new persona...");
-    const conversationResponse = await axios.post(
-      'https://tavusapi.com/v2/conversations',
-      {
-        replica_id: TAVUS_REPLICA_ID,
-        persona_id: newPersonaId, // Using the ID of the persona we just created
-      },
-      { headers: { 'x-api-key': TAVUS_API_KEY } }
-    );
-
-    const conversationUrl = conversationResponse.data.conversation_url;
-    console.log(`✅ Conversation created successfully. URL: ${conversationUrl}`);
-    
-    res.status(200).json({ conversationUrl });
-
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-        console.error('❌ Axios Error:', error.response?.data || error.message);
-    } else {
-        console.error('❌ General Error:', error);
-    }
-    next(error);
-  }
-};
+export default Setup;
