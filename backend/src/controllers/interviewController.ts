@@ -8,7 +8,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 // Helper function to generate persona instructions using Gemini
 const generatePersonaInstructions = async (jobTitle: string): Promise<string> => {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
     
     const prompt = `You are an expert career coach and hiring manager. Your task is to generate a comprehensive set of "persona_instructions" for another AI that will conduct a mock interview. The user is practicing for a '${jobTitle}' role. The instructions must be detailed, including a friendly but professional opening, a mix of 5-7 behavioral and technical questions relevant to the role, and an encouraging closing statement. The questions must be unique and varied for each generation to prevent repetition. Do not use markdown.`;
     
@@ -60,16 +60,16 @@ export const createConversation = async (
     }
 
     // Step 3: Create final persona instructions
-    const script = `${instructions}\n\nJudgment Criteria:\n${finalCriteria}`;
+    const persona_instructions = `${instructions}\n\nJudgment Criteria:\n${finalCriteria}`;
 
-    console.log("Final script length:", script.length);
+    console.log("Final persona instructions length:", persona_instructions.length);
 
     // Step 4: Call Tavus API to create conversation
     const conversationResponse = await axios.post(
       'https://tavusapi.com/v2/conversations',
       {
         replica_id: TAVUS_REPLICA_ID,
-        script: script,
+        persona_instructions: persona_instructions,
       },
       {
         headers: { 'x-api-key': TAVUS_API_KEY },
