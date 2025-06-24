@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SkipForward, Square, Mic, MicOff, Video, VideoOff, Download } from 'lucide-react';
+import { SkipForward, Square, Mic, MicOff, Video, VideoOff, Download, AlertCircle } from 'lucide-react';
 
 const Interview = () => {
   const navigate = useNavigate();
@@ -9,21 +9,26 @@ const Interview = () => {
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [conversationUrl, setConversationUrl] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sessionDuration, setSessionDuration] = useState(0);
 
   // Recording refs and state
   const userVideoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const sessionStartTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
     // Get the conversation URL from localStorage
     const url = localStorage.getItem('conversationUrl');
     if (url) {
       setConversationUrl(url);
+      console.log('Loaded conversation URL:', url);
     } else {
       console.error("No conversation URL found. Navigating back to setup.");
-      navigate('/setup');
+      setError("No interview session found. Please set up a new interview.");
+      setTimeout(() => navigate('/setup'), 3000);
       return;
     }
 
@@ -59,17 +64,25 @@ const Interview = () => {
         // Start recording
         mediaRecorder.start(1000); // Record in 1-second chunks
         setIsRecording(true);
+        sessionStartTimeRef.current = Date.now();
         console.log('Recording started');
 
       } catch (err) {
         console.error("Failed to get user media:", err);
+        setError("Failed to access camera and microphone. Please check your permissions.");
       }
     };
 
     initializeMedia();
 
+    // Session duration timer
+    const timer = setInterval(() => {
+      setSessionDuration(Math.floor((Date.now() - sessionStartTimeRef.current) / 1000));
+    }, 1000);
+
     // Cleanup function
     return () => {
+      clearInterval(timer);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
@@ -108,6 +121,7 @@ const Interview = () => {
       console.log('Download triggered successfully');
     } catch (error) {
       console.error('Error triggering download:', error);
+      setError('Failed to download recording. Please try again.');
     }
   };
 
@@ -138,6 +152,9 @@ const Interview = () => {
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     
+    // Clear conversation URL from localStorage
+    localStorage.removeItem('conversationUrl');
+    
     // Navigate to feedback page after a short delay to ensure download starts
     setTimeout(() => {
       navigate('/feedback/1');
@@ -164,6 +181,34 @@ const Interview = () => {
     }
   };
 
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-light-primary dark:bg-dark-primary flex items-center justify-center">
+        <div className="text-center p-8">
+          <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-light-text-primary dark:text-dark-text-primary mb-2">
+            Interview Session Error
+          </h2>
+          <p className="text-light-text-secondary dark:text-dark-text-secondary mb-4">
+            {error}
+          </p>
+          <button
+            onClick={() => navigate('/setup')}
+            className="px-6 py-3 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity"
+          >
+            Return to Setup
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-light-primary dark:bg-dark-primary">
       {/* Header */}
@@ -177,7 +222,7 @@ const Interview = () => {
               </span>
               {isRecording && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                  Recording...
+                  Recording • {formatDuration(sessionDuration)}
                 </span>
               )}
             </div>
@@ -205,6 +250,15 @@ const Interview = () => {
                 muted 
                 className="w-full h-full object-cover" 
               />
+              
+              {!isVideoOn && (
+                <div className="absolute inset-0 bg-black flex items-center justify-center">
+                  <div className="text-center">
+                    <VideoOff className="h-16 w-16 text-white/50 mx-auto mb-4" />
+                    <p className="text-white/70">Camera is off</p>
+                  </div>
+                </div>
+              )}
               
               {/* Video Controls Overlay */}
               <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
@@ -289,10 +343,6 @@ const Interview = () => {
                 Interview Controls
               </h3>
               <div className="space-y-3">
-                <button className="w-full flex items-center justify-center px-4 py-3 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity">
-                  <SkipForward className="h-4 w-4 mr-2" />
-                  Next Question
-                </button>
                 <button 
                   onClick={triggerDownload}
                   className="w-full flex items-center justify-center px-4 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors"
@@ -318,13 +368,19 @@ const Interview = () => {
                 <div className="flex justify-between">
                   <span className="text-light-text-secondary dark:text-dark-text-secondary">Duration:</span>
                   <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
-                    {Math.floor(Date.now() / 60000) % 60}:00
+                    {formatDuration(sessionDuration)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Questions:</span>
-                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
-                    {currentQuestion + 1} / 5
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera:</span>
+                  <span className={`font-medium ${isVideoOn ? 'text-green-500' : 'text-red-500'}`}>
+                    {isVideoOn ? 'On' : 'Off'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Microphone:</span>
+                  <span className={`font-medium ${!isMuted ? 'text-green-500' : 'text-red-500'}`}>
+                    {!isMuted ? 'On' : 'Muted'}
                   </span>
                 </div>
               </div>

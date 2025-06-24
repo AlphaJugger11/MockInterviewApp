@@ -8,9 +8,20 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 // Helper function to generate persona instructions using Gemini
 const generatePersonaInstructions = async (jobTitle: string): Promise<string> => {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
     
-    const prompt = `You are an expert career coach and hiring manager. Your task is to generate a comprehensive set of "persona_instructions" for another AI that will conduct a mock interview. The user is practicing for a '${jobTitle}' role. The instructions must be detailed, including a friendly but professional opening, a mix of 5-7 behavioral and technical questions relevant to the role, and an encouraging closing statement. The questions must be unique and varied for each generation to prevent repetition. Do not use markdown.`;
+    const prompt = `You are an expert career coach and hiring manager. Your task is to generate a comprehensive set of "persona_instructions" for another AI that will conduct a mock interview. The user is practicing for a '${jobTitle}' role. 
+
+Create detailed instructions that include:
+1. A friendly but professional opening greeting
+2. A mix of 5-7 behavioral and technical questions relevant to the role
+3. Follow-up questions based on responses
+4. An encouraging closing statement
+5. Instructions to provide constructive feedback
+
+The questions must be unique and varied for each generation to prevent repetition. Focus on real-world scenarios and industry-specific challenges. Do not use markdown formatting.
+
+Make the interviewer persona professional, encouraging, and thorough in their evaluation.`;
     
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -18,7 +29,7 @@ const generatePersonaInstructions = async (jobTitle: string): Promise<string> =>
   } catch (error) {
     console.error('Error generating persona instructions with Gemini:', error);
     // Fallback instructions if Gemini fails
-    return `Hello! I'm excited to conduct your mock interview for the ${jobTitle} position. I'll be asking you a mix of behavioral and technical questions to help you prepare. Let's begin with: Tell me about yourself and why you're interested in this ${jobTitle} role.`;
+    return `Hello! I'm excited to conduct your mock interview for the ${jobTitle} position. I'll be asking you a mix of behavioral and technical questions to help you prepare. Let's begin with: Tell me about yourself and why you're interested in this ${jobTitle} role. After each answer, I'll provide constructive feedback to help you improve. Let's start!`;
   }
 };
 
@@ -35,7 +46,19 @@ export const createConversation = async (
     const TAVUS_REPLICA_ID = process.env.TAVUS_REPLICA_ID as string;
     
     if (!TAVUS_API_KEY || !TAVUS_REPLICA_ID) {
-      throw new Error('TAVUS_API_KEY or TAVUS_REPLICA_ID is not set in environment variables.');
+      res.status(500).json({
+        success: false,
+        error: 'Server configuration error: Missing API credentials'
+      });
+      return;
+    }
+
+    if (!jobTitle || typeof jobTitle !== 'string' || jobTitle.trim().length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'Job title is required and must be a non-empty string'
+      });
+      return;
     }
 
     console.log("✅ Creating conversation with dynamic persona for job title:", jobTitle);
@@ -52,7 +75,7 @@ export const createConversation = async (
     }
 
     // Step 2: Combine with judgment criteria
-    const baselineCriteria = "Critically evaluate the candidate's response on the following: 1. Clarity and conciseness of their answer. 2. Use of the STAR (Situation, Task, Action, Result) method for behavioral questions. 3. Confidence and tone of voice.";
+    const baselineCriteria = "Critically evaluate the candidate's response on the following: 1. Clarity and conciseness of their answer. 2. Use of the STAR (Situation, Task, Action, Result) method for behavioral questions. 3. Confidence and tone of voice. 4. Relevance to the role and industry.";
     
     let finalCriteria = baselineCriteria;
     if (customCriteria && customCriteria.trim()) {
@@ -60,7 +83,7 @@ export const createConversation = async (
     }
 
     // Step 3: Create final persona instructions
-    const persona_instructions = `${instructions}\n\nJudgment Criteria:\n${finalCriteria}`;
+    const persona_instructions = `${instructions}\n\nJudgment Criteria:\n${finalCriteria}\n\nRemember to be encouraging while providing honest, constructive feedback after each response.`;
 
     console.log("Final persona instructions length:", persona_instructions.length);
 
@@ -72,12 +95,20 @@ export const createConversation = async (
         persona_instructions: persona_instructions,
       },
       {
-        headers: { 'x-api-key': TAVUS_API_KEY },
+        headers: { 
+          'x-api-key': TAVUS_API_KEY,
+          'Content-Type': 'application/json'
+        },
         timeout: 30000 
       }
     );
     
     const { conversation_url } = conversationResponse.data;
+    
+    if (!conversation_url) {
+      throw new Error('No conversation URL received from Tavus API');
+    }
+    
     console.log('✅ Conversation created successfully. URL:', conversation_url);
     
     res.status(200).json({ 
@@ -87,12 +118,21 @@ export const createConversation = async (
     });
 
   } catch (error) {
+    console.error('❌ Error in createConversation:', error);
+    
     if (axios.isAxiosError(error)) {
-      console.error('❌ Axios Error in createConversation:', error.response?.data || 'No response data');
+      const status = error.response?.status || 500;
+      const message = error.response?.data?.message || error.response?.data?.error || 'External API Error';
+      res.status(status).json({
+        success: false,
+        error: `Tavus API Error: ${message}`
+      });
     } else {
-      console.error('❌ General Error in createConversation:', error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Internal server error'
+      });
     }
-    next(error);
   }
 };
 
