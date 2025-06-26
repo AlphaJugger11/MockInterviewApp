@@ -1,20 +1,19 @@
-import 'dotenv/config'; 
+import dotenv from 'dotenv';
+dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
-import dotenv from 'dotenv';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import interviewRoutes from './routes/interview';
 
 // Load environment variables
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-
+// console.log(`TAVUS_API_KEY: ${process.env.TAVUS_API_ KEY}`); // Debugging line to check if the API key is loaded
 // Security middleware
 app.use(helmet());
 

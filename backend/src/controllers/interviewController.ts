@@ -2,13 +2,15 @@ import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// console.log("InterviewController GEMINI_API_KEY:", process.env.GEMINI_API_KEY);
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-
+// console.log(genAI)
 // Helper function to generate persona instructions using Gemini
+
 const generatePersonaInstructions = async (jobTitle: string): Promise<string> => {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' });
     
     const prompt = `You are an expert career coach and hiring manager. Your task is to generate a comprehensive set of "persona_instructions" for another AI that will conduct a mock interview. The user is practicing for a '${jobTitle}' role. 
 
@@ -34,6 +36,7 @@ Make the interviewer persona professional, encouraging, and thorough in their ev
 };
 
 // Main controller function for creating conversations
+// console.log("InterviewController TAVUS_API_KEY:", process.env.TAVUS_API_KEY);
 export const createConversation = async (
   req: Request,
   res: Response,
