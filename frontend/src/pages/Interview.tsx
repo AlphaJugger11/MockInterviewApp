@@ -99,7 +99,7 @@ const Interview = () => {
     };
   }, [navigate]);
 
-  // Initialize Daily.js for real conversation capture and Tavus recording
+  // Initialize Daily.js for real conversation capture and recording
   const initializeDailyCapture = async (conversationUrl: string, conversationId: string) => {
     try {
       console.log('🎯 Initializing Daily.js for conversation capture and recording...');
@@ -174,7 +174,7 @@ const Interview = () => {
       callFrame.join({ url: conversationUrl }).then(() => {
         console.log('✅ Joined Daily call for transcript capture');
         
-        // Start Tavus recording using Daily API
+        // Start Daily.js recording using cloud recording
         setTimeout(() => {
           try {
             callFrame.startRecording({ 
@@ -183,7 +183,7 @@ const Interview = () => {
                 preset: 'default'
               }
             });
-            console.log('🎬 Started Tavus cloud recording');
+            console.log('🎬 Started Daily.js cloud recording');
             setRecordingSize(1); // Indicate recording started
           } catch (recordError) {
             console.warn('⚠️ Could not start cloud recording:', recordError);
@@ -223,7 +223,7 @@ const Interview = () => {
       // Step 2: Stop Daily recording and leave call
       if (dailyCallRef.current) {
         try {
-          console.log('🛑 Stopping Tavus recording and leaving Daily call...');
+          console.log('🛑 Stopping Daily.js recording and leaving call...');
           await dailyCallRef.current.stopRecording();
           await dailyCallRef.current.leave();
           dailyCallRef.current.destroy();
@@ -443,7 +443,7 @@ const Interview = () => {
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session (Tavus Recording)
+                Live Interview Session (Daily.js Recording)
               </span>
               {isRecording && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
@@ -488,7 +488,7 @@ const Interview = () => {
                   <div className="text-center">
                     <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      <span>Tavus Cloud Recording Active</span>
+                      <span>Daily.js Cloud Recording Active</span>
                     </div>
                   </div>
                 </div>
@@ -532,7 +532,7 @@ const Interview = () => {
               </div>
               
               <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
-                Your camera preview - Tavus is recording the complete interview
+                Your camera preview - Daily.js is recording the complete interview
               </p>
             </div>
 
@@ -574,7 +574,7 @@ const Interview = () => {
                 <div className="flex justify-between">
                   <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
                   <span className="text-green-500 font-medium">
-                    Tavus Cloud
+                    Daily.js Cloud
                   </span>
                 </div>
                 <div className="flex justify-between">

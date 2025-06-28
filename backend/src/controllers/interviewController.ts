@@ -146,8 +146,8 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Create conversation with recording enabled
-    console.log("Creating conversation with enhanced conversational context and recording...");
+    // Step 4: Create conversation WITHOUT enable_recording (not supported in this API version)
+    console.log("Creating conversation with enhanced conversational context...");
     
     try {
       const conversationResponse = await axios.post(
@@ -156,7 +156,6 @@ IMPORTANT REMINDERS:
           replica_id: TAVUS_REPLICA_ID,
           conversational_context: conversationalContext,
           callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`,
-          enable_recording: true, // Enable Tavus recording
           properties: {
             max_call_duration: 1200, // 20 minutes max call duration
             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
@@ -178,7 +177,7 @@ IMPORTANT REMINDERS:
         throw new Error('No conversation URL or ID received from Tavus API');
       }
       
-      console.log('✅ Conversation created successfully with recording enabled. URL:', conversation_url, 'ID:', conversation_id);
+      console.log('✅ Conversation created successfully. URL:', conversation_url, 'ID:', conversation_id);
 
       // Step 5: Store session data for later analysis
       const sessionData = {
@@ -189,7 +188,7 @@ IMPORTANT REMINDERS:
         feedbackMetrics: feedbackMetrics || {},
         conversationId: conversation_id,
         conversationalContext: conversationalContext,
-        recordingEnabled: true,
+        recordingEnabled: false, // Will use Daily.js recording instead
         timestamp: new Date().toISOString()
       };
       
@@ -208,14 +207,14 @@ IMPORTANT REMINDERS:
         success: true,
         conversation_url,
         conversation_id,
-        message: 'Interview conversation created successfully with recording enabled',
+        message: 'Interview conversation created successfully with Daily.js recording',
         sessionData: {
           jobTitle: sessionData.jobTitle,
           userName: sessionData.userName,
           hasCustomInstructions: !!customInstructions,
           hasCustomCriteria: !!customCriteria,
           conversationId: conversation_id,
-          recordingEnabled: true,
+          recordingEnabled: false, // Using Daily.js instead
           method: 'conversational_context'
         }
       });
@@ -246,14 +245,13 @@ IMPORTANT REMINDERS:
         const dynamicPersonaId = personaResponse.data.persona_id;
         console.log("✅ Dynamic persona created as fallback:", dynamicPersonaId);
 
-        // Create conversation with the dynamic persona and recording
+        // Create conversation with the dynamic persona
         const conversationResponse = await axios.post(
           'https://tavusapi.com/v2/conversations',
           {
             replica_id: TAVUS_REPLICA_ID,
             persona_id: dynamicPersonaId,
             callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`,
-            enable_recording: true, // Enable Tavus recording
             properties: {
               max_call_duration: 1200,
               participant_absent_timeout: 300,
@@ -275,7 +273,7 @@ IMPORTANT REMINDERS:
           throw new Error('No conversation URL or ID received from Tavus API');
         }
         
-        console.log('✅ Conversation created successfully with dynamic persona and recording. URL:', conversation_url, 'ID:', conversation_id);
+        console.log('✅ Conversation created successfully with dynamic persona. URL:', conversation_url, 'ID:', conversation_id);
 
         const sessionData = {
           jobTitle: jobTitle.trim(),
@@ -285,7 +283,7 @@ IMPORTANT REMINDERS:
           feedbackMetrics: feedbackMetrics || {},
           dynamicPersonaId: dynamicPersonaId,
           conversationId: conversation_id,
-          recordingEnabled: true,
+          recordingEnabled: false, // Using Daily.js instead
           timestamp: new Date().toISOString()
         };
         
@@ -293,7 +291,7 @@ IMPORTANT REMINDERS:
           success: true,
           conversation_url,
           conversation_id,
-          message: 'Interview conversation created successfully with dynamic persona and recording (fallback)',
+          message: 'Interview conversation created successfully with dynamic persona and Daily.js recording (fallback)',
           sessionData: {
             jobTitle: sessionData.jobTitle,
             userName: sessionData.userName,
@@ -301,7 +299,7 @@ IMPORTANT REMINDERS:
             hasCustomCriteria: !!customCriteria,
             conversationId: conversation_id,
             dynamicPersonaId: dynamicPersonaId,
-            recordingEnabled: true,
+            recordingEnabled: false, // Using Daily.js instead
             method: 'dynamic_persona'
           }
         });
