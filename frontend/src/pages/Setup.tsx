@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Target, User, BarChart3, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowRight, Target, User, BarChart3, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const Setup = () => {
@@ -18,14 +18,49 @@ const Setup = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'error'>('checking');
+
+  // Check backend connectivity on component mount
+  useEffect(() => {
+    const checkBackendConnection = async () => {
+      try {
+        console.log('🔍 Checking backend connectivity...');
+        
+        const response = await fetch('http://localhost:3001/api/test', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Backend connected:', data);
+          setBackendStatus('connected');
+        } else {
+          throw new Error(`Backend responded with status: ${response.status}`);
+        }
+      } catch (err) {
+        console.error('❌ Backend connection failed:', err);
+        setBackendStatus('error');
+        setError('Cannot connect to backend server. Please ensure the backend is running on port 3001.');
+      }
+    };
+
+    checkBackendConnection();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (backendStatus !== 'connected') {
+      setError('Backend is not connected. Please check the server status.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log('Creating conversation with dynamic persona:', { 
+      console.log('🚀 Creating conversation with enhanced recording:', { 
         jobTitle, 
         userName, 
         customInstructions, 
@@ -35,7 +70,10 @@ const Setup = () => {
       
       const response = await fetch('http://localhost:3001/api/interview/create-conversation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({ 
           jobTitle: jobTitle.trim(), 
           userName: userName.trim(),
@@ -45,9 +83,21 @@ const Setup = () => {
         }),
       });
 
+      console.log('📡 Response status:', response.status);
+      console.log('📡 Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create interview conversation.');
+        const errorText = await response.text();
+        console.error('❌ Response error:', errorText);
+        
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Unknown error occurred' };
+        }
+        
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
       
       const data = await response.json();
@@ -57,7 +107,7 @@ const Setup = () => {
         throw new Error('No conversation URL or ID received from server.');
       }
       
-      console.log('Conversation created successfully:', { conversation_url, conversation_id, sessionData });
+      console.log('✅ Conversation created successfully:', { conversation_url, conversation_id, sessionData });
       
       // Store conversation data and session info for the interview page
       localStorage.setItem('conversationUrl', conversation_url);
@@ -80,11 +130,17 @@ const Setup = () => {
         localStorage.setItem('customCriteria', customCriteria.trim());
       }
       
+      console.log('💾 Session data stored, navigating to interview...');
       navigate('/interview');
 
     } catch (err) {
-      console.error('Error creating conversation:', err);
-      setError(err instanceof Error ? err.message : "An unknown error occurred.");
+      console.error('❌ Error creating conversation:', err);
+      
+      if (err instanceof TypeError && err.message.includes('fetch')) {
+        setError('Network error: Cannot connect to the backend server. Please check if the backend is running.');
+      } else {
+        setError(err instanceof Error ? err.message : "An unknown error occurred.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -92,6 +148,23 @@ const Setup = () => {
 
   const toggleMetric = (metric: keyof typeof feedbackMetrics) => {
     setFeedbackMetrics(prev => ({ ...prev, [metric]: !prev[metric] }));
+  };
+
+  const retryBackendConnection = async () => {
+    setBackendStatus('checking');
+    setError(null);
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/test');
+      if (response.ok) {
+        setBackendStatus('connected');
+      } else {
+        throw new Error('Backend not responding');
+      }
+    } catch (err) {
+      setBackendStatus('error');
+      setError('Backend connection failed. Please ensure the server is running.');
+    }
   };
 
   return (
@@ -104,6 +177,40 @@ const Setup = () => {
           <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
             Configure your interview session to get the most relevant practice experience with a personalized AI coach.
           </p>
+        </div>
+
+        {/* Backend Status Indicator */}
+        <div className="mb-6 p-4 rounded-lg border border-light-border dark:border-dark-border bg-light-secondary dark:bg-dark-secondary">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              {backendStatus === 'checking' && (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+                  <span className="text-blue-500">Checking backend connection...</span>
+                </>
+              )}
+              {backendStatus === 'connected' && (
+                <>
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                  <span className="text-green-500">Backend connected and ready</span>
+                </>
+              )}
+              {backendStatus === 'error' && (
+                <>
+                  <AlertCircle className="h-5 w-5 text-red-500" />
+                  <span className="text-red-500">Backend connection failed</span>
+                </>
+              )}
+            </div>
+            {backendStatus === 'error' && (
+              <button
+                onClick={retryBackendConnection}
+                className="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition-colors"
+              >
+                Retry
+              </button>
+            )}
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-8">
@@ -270,13 +377,13 @@ const Setup = () => {
           <div className="flex justify-end">
             <button 
               type="submit" 
-              disabled={isLoading || !jobTitle.trim() || !userName.trim()} 
+              disabled={isLoading || !jobTitle.trim() || !userName.trim() || backendStatus !== 'connected'} 
               className="inline-flex items-center justify-center px-8 py-4 bg-light-accent dark:bg-dark-accent text-white font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Creating Dynamic Interview...
+                  Creating Enhanced Interview...
                 </>
               ) : (
                 <>

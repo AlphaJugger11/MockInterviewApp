@@ -13,20 +13,29 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false
+}));
 
-// CORS configuration
+// Enhanced CORS configuration
 app.use(cors({
   origin: [
     'http://localhost:5173', // Vite dev server
     'http://localhost:3000', // Alternative React dev server
     'http://127.0.0.1:5173', // Alternative localhost format
     /^https:\/\/.*\.local-credentialless\.webcontainer-api\.io$/, // WebContainer URLs
+    /^https:\/\/.*\.webcontainer-api\.io$/, // WebContainer URLs
+    /^https:\/\/.*\.bolt\.new$/, // Bolt.new URLs
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Compression middleware
 app.use(compression());
@@ -34,9 +43,9 @@ app.use(compression());
 // Logging middleware
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Body parsing middleware with increased limits
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -45,6 +54,17 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
+    port: PORT,
+    cors: 'enabled'
+  });
+});
+
+// Test endpoint for frontend connectivity
+app.get('/api/test', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Backend is connected and working!',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -69,10 +89,11 @@ process.on('SIGINT', () => {
 });
 
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Ascend AI Backend Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔗 Test endpoint: http://localhost:${PORT}/api/test`);
   
   if (process.env.NODE_ENV !== 'production') {
     console.log(`🌐 CORS enabled for WebContainer URLs`);
