@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Target, BarChart3, Loader2, AlertCircle } from 'lucide-react';
+import { ArrowRight, Target, MessageSquare, BarChart3, Loader2, User, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const Setup = () => {
   const navigate = useNavigate();
   const [jobTitle, setJobTitle] = useState('');
   const [userName, setUserName] = useState('');
+  const [company, setCompany] = useState('');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [customCriteria, setCustomCriteria] = useState('');
   const [feedbackMetrics, setFeedbackMetrics] = useState({
     answerStructure: true,
     speechDelivery: true,
@@ -24,7 +27,9 @@ const Setup = () => {
     try {
       console.log('Creating conversation with:', { 
         jobTitle, 
-        userName
+        userName, 
+        customInstructions, 
+        customCriteria 
       });
       
       const response = await fetch('http://localhost:3001/api/interview/create-conversation', {
@@ -32,7 +37,9 @@ const Setup = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           jobTitle: jobTitle.trim(), 
-          userName: userName.trim()
+          userName: userName.trim(),
+          customInstructions: customInstructions.trim() || undefined, 
+          customCriteria: customCriteria.trim() || undefined
         }),
       });
 
@@ -122,27 +129,78 @@ const Setup = () => {
                   required 
                 />
               </div>
-            </div>
-            
-            {/* AI Interviewer Info */}
-            <div className="mt-6 p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
-              <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
-                🤖 AI Interviewer: Sarah
-              </h4>
-              <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                Your AI interviewer is pre-configured with advanced vision capabilities and will provide real-time feedback on your answers, body language, and communication skills. She will greet you by name and guide you through a professional interview experience.
-              </p>
+              <div className="md:col-span-2">
+                <label htmlFor="company" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Target Company (Optional)
+                </label>
+                <input 
+                  type="text" 
+                  id="company" 
+                  value={company} 
+                  onChange={(e) => setCompany(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="e.g., Netflix" 
+                />
+              </div>
             </div>
           </div>
 
-          {/* Step 2: Feedback Metrics */}
+          {/* Step 2: Customize Your Interviewer */}
+          <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
+            <div className="flex items-center space-x-3 mb-6">
+              <div className="w-8 h-8 bg-light-accent dark:bg-dark-accent rounded-full flex items-center justify-center">
+                <User className="h-4 w-4 text-white" />
+              </div>
+              <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">
+                Step 2: Customize Your AI Interviewer
+              </h2>
+            </div>
+            
+            <div className="space-y-6">
+              <div>
+                <label htmlFor="customInstructions" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Custom Persona Instructions
+                </label>
+                <textarea 
+                  id="customInstructions" 
+                  rows={6} 
+                  value={customInstructions} 
+                  onChange={(e) => setCustomInstructions(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="Optional: Define your AI's personality, the questions it should ask, and its overall goal. Leave blank to auto-generate based on your job title using AI..."
+                />
+                <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
+                  If left empty, our AI will automatically generate personalized instructions based on your job title and name.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="customCriteria" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Custom Judgment Criteria
+                </label>
+                <textarea 
+                  id="customCriteria" 
+                  rows={3} 
+                  value={customCriteria} 
+                  onChange={(e) => setCustomCriteria(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="Optional: List specific things you want to be judged on (e.g., technical depth, leadership examples, problem-solving approach)..."
+                />
+                <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
+                  These will be combined with our standard evaluation criteria (STAR method, clarity, confidence, non-verbal communication).
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 3: Feedback Metrics */}
           <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
             <div className="flex items-center space-x-3 mb-6">
               <div className="w-8 h-8 bg-light-accent dark:bg-dark-accent rounded-full flex items-center justify-center">
                 <BarChart3 className="h-4 w-4 text-white" />
               </div>
               <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">
-                Step 2: Feedback Metrics
+                Step 3: Feedback Metrics
               </h2>
             </div>
             

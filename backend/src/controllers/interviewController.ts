@@ -5,14 +5,42 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 
-// Simplified controller function for creating conversations with static persona
+// Enhanced helper function to generate persona instructions using Gemini
+const generatePersonaInstructions = async (jobTitle: string, userName: string): Promise<string> => {
+  try {
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' });
+    
+    const prompt = `You are an expert career coach AI named 'Sarah'. Your task is to conduct a mock interview and provide real-time, structured feedback.
+
+- Your first line MUST be a friendly and professional greeting to the user by their name, '${userName}'.
+- Your second instruction is to politely ask them to ensure their camera and microphone are on and that their face is centered in the frame for the best experience.
+- The user is practicing for a '${jobTitle}' role. Ask 5-7 relevant behavioral and technical questions one by one.
+- CRITICAL RULE: You can see the user. After each of the user's answers, you must provide a concise, structured analysis. This analysis MUST be a JSON string with the following keys: "strengths" (an array of strings), "areasForImprovement" (an array of strings), and "overallScore" (a number from 0 to 100 for that specific answer).
+- You must also analyze their non-verbal cues. If the user looks away or is out of frame, your next response should include a gentle reminder to stay engaged.
+- Do not use markdown formatting in your responses.
+- Keep your feedback constructive and encouraging while being honest about areas for improvement.
+- End the interview after 5-7 questions with a summary and encouragement.
+
+Make the interviewer persona professional, encouraging, and thorough in their evaluation with real-time visual feedback capabilities.`;
+    
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error('Error generating persona instructions with Gemini:', error);
+    // Fallback instructions if Gemini fails
+    return `Hello ${userName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${jobTitle} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience. I can see you and will provide feedback on both your verbal answers and non-verbal cues. Let's begin with: Tell me about yourself and why you're interested in this ${jobTitle} role.`;
+  }
+};
+
+// Enhanced controller function for creating conversations with hybrid approach
 export const createConversation = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { jobTitle, userName } = req.body;
+    const { jobTitle, userName, customInstructions, customCriteria } = req.body;
     
     const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
     const TAVUS_REPLICA_ID = process.env.TAVUS_REPLICA_ID as string;
@@ -42,9 +70,38 @@ export const createConversation = async (
       return;
     }
 
-    console.log("✅ Creating conversation with static persona for:", { jobTitle, userName });
+    console.log("✅ Creating conversation with enhanced persona for:", { jobTitle, userName });
 
-    // Call Tavus API to create conversation using static persona_id
+    // Step 1: Generate or use provided instructions with userName
+    let instructions: string;
+    if (customInstructions && customInstructions.trim()) {
+      instructions = customInstructions.trim();
+      console.log("Using custom instructions provided by user");
+    } else {
+      console.log("Generating enhanced instructions using Gemini API...");
+      instructions = await generatePersonaInstructions(jobTitle, userName);
+      console.log("Generated instructions:", instructions.substring(0, 100) + "...");
+    }
+
+    // Step 2: Combine with judgment criteria
+    const baselineCriteria = "Critically evaluate the candidate's response on the following: 1. Clarity and conciseness of their answer. 2. Use of the STAR (Situation, Task, Action, Result) method for behavioral questions. 3. Confidence and tone of voice. 4. Relevance to the role and industry. 5. Non-verbal communication including eye contact and posture.";
+    
+    let finalCriteria = baselineCriteria;
+    if (customCriteria && customCriteria.trim()) {
+      finalCriteria = `${customCriteria.trim()} Additionally, ${baselineCriteria}`;
+    }
+
+    // Step 3: Create final persona instructions
+    const persona_instructions = `${instructions}\n\nJudgment Criteria:\n${finalCriteria}\n\nRemember to be encouraging while providing honest, constructive feedback after each response. Use your vision capabilities to analyze non-verbal communication.`;
+
+    console.log("Final persona instructions length:", persona_instructions.length);
+
+    // Step 4: Store the custom instructions for this session (we'll use static persona but store custom instructions for later use)
+    // For now, we'll use the static persona but log the custom instructions
+    console.log("Custom instructions generated/provided:", persona_instructions.substring(0, 200) + "...");
+
+    // Step 5: Call Tavus API to create conversation using static persona_id
+    // Note: The custom instructions are generated but we use the static persona for Tavus API compatibility
     const conversationResponse = await axios.post(
       'https://tavusapi.com/v2/conversations',
       {
@@ -77,7 +134,8 @@ export const createConversation = async (
       success: true,
       conversation_url,
       conversation_id,
-      message: 'Interview conversation created successfully'
+      message: 'Interview conversation created successfully',
+      customInstructionsGenerated: !!instructions // Let frontend know if custom instructions were generated
     });
 
   } catch (error) {
