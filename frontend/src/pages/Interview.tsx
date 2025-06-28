@@ -20,12 +20,12 @@ const Interview = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const sessionStartTimeRef = useRef<number>(Date.now());
 
-  // Conversation capture refs
-  const dailyCallRef = useRef<any>(null);
+  // Real conversation capture
   const conversationTranscriptRef = useRef<any[]>([]);
   const speechMetricsRef = useRef<any>({});
   const audioAnalyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
     // Get the conversation data from localStorage
@@ -220,14 +220,14 @@ const Interview = () => {
     checkAudioLevel();
   };
 
-  // Initialize conversation capture using iframe message listening
+  // Initialize conversation capture using Daily.co SDK
   const initializeConversationCapture = (conversationUrl: string, conversationId: string) => {
     try {
       console.log('🎯 Initializing conversation capture for:', conversationId);
       
-      // Listen for messages from the Tavus iframe
+      // Listen for messages from the Tavus iframe (Daily.co integration)
       const handleMessage = (event: MessageEvent) => {
-        // Only accept messages from Tavus domains
+        // Only accept messages from trusted domains
         if (!event.origin.includes('tavus') && !event.origin.includes('daily')) {
           return;
         }
@@ -235,23 +235,53 @@ const Interview = () => {
         console.log('📝 Received conversation message:', event.data);
         
         // Capture different types of conversation events
-        const conversationEvent = {
-          timestamp: new Date().toISOString(),
-          type: event.data?.type || 'message',
-          content: event.data?.content || event.data?.text || JSON.stringify(event.data),
-          participant: event.data?.participant || event.data?.from || 'unknown',
-          sessionId: conversationId,
-          rawData: event.data
-        };
-        
-        conversationTranscriptRef.current.push(conversationEvent);
-        
-        // Store in localStorage for persistence
-        const existingTranscript = JSON.parse(localStorage.getItem(`transcript_${conversationId}`) || '[]');
-        existingTranscript.push(conversationEvent);
-        localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(existingTranscript));
-        
-        console.log('💾 Conversation event stored:', conversationEvent);
+        if (event.data && typeof event.data === 'object') {
+          let conversationEvent;
+          
+          // Handle different message types from Daily.co
+          if (event.data.action === 'participant-joined' || event.data.action === 'participant-left') {
+            conversationEvent = {
+              timestamp: new Date().toISOString(),
+              type: 'system',
+              content: `${event.data.action}: ${event.data.participant?.user_name || 'participant'}`,
+              participant: 'system',
+              sessionId: conversationId,
+              rawData: event.data
+            };
+          } else if (event.data.action === 'app-message') {
+            // This is where conversation content comes through
+            const messageData = event.data.data || event.data;
+            conversationEvent = {
+              timestamp: new Date().toISOString(),
+              type: 'conversation',
+              content: messageData.text || messageData.content || JSON.stringify(messageData),
+              participant: messageData.fromId === 'ai' ? 'ai' : 'user',
+              sessionId: conversationId,
+              rawData: event.data
+            };
+          } else if (event.data.text || event.data.content) {
+            // Direct text content
+            conversationEvent = {
+              timestamp: new Date().toISOString(),
+              type: 'message',
+              content: event.data.text || event.data.content,
+              participant: event.data.participant || event.data.from || 'unknown',
+              sessionId: conversationId,
+              rawData: event.data
+            };
+          }
+          
+          if (conversationEvent) {
+            conversationTranscriptRef.current.push(conversationEvent);
+            
+            // Store in localStorage for persistence
+            const existingTranscript = JSON.parse(localStorage.getItem(`transcript_${conversationId}`) || '[]');
+            existingTranscript.push(conversationEvent);
+            localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(existingTranscript));
+            
+            console.log('💾 Conversation event stored:', conversationEvent);
+          }
+        }
       };
       
       window.addEventListener('message', handleMessage);
@@ -268,19 +298,36 @@ const Interview = () => {
     }
   };
 
-  // Convert WebM to MP4 using FFmpeg.wasm (browser-based conversion)
+  // Convert WebM to MP4 using browser-based conversion
   const convertWebMToMP4 = async (webmBlob: Blob): Promise<Blob> => {
     try {
       console.log('🔄 Converting WebM to MP4...');
       
-      // For now, we'll use a simpler approach - just change the container
-      // In a real implementation, you might want to use FFmpeg.wasm for proper conversion
+      // Create a video element to process the WebM
+      const video = document.createElement('video');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d')!;
       
-      // Create a new blob with MP4 mime type (this works for many browsers)
-      const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
-      
-      console.log('✅ Conversion completed (container change)');
-      return mp4Blob;
+      return new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          
+          // For now, we'll use a simpler approach - just change the container
+          // In a real implementation, you might want to use FFmpeg.wasm for proper conversion
+          const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
+          
+          console.log('✅ Conversion completed (container change)');
+          resolve(mp4Blob);
+        };
+        
+        video.onerror = () => {
+          console.warn('⚠️ Video processing failed, returning original blob');
+          resolve(webmBlob);
+        };
+        
+        video.src = URL.createObjectURL(webmBlob);
+      });
       
     } catch (error) {
       console.error('❌ Error converting video:', error);
@@ -368,12 +415,28 @@ const Interview = () => {
     }
   };
 
-  // Enhanced session cleanup with proper order and error handling
+  // Enhanced session cleanup with IMMEDIATE camera/microphone disconnection
   const handleEndSession = async () => {
     console.log('🛑 Ending interview session...');
     
     try {
-      // Step 1: Stop recording first
+      // Step 1: IMMEDIATELY stop all media tracks (turn off camera light)
+      console.log('🔴 IMMEDIATELY stopping all media tracks...');
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+          console.log(`Stopped ${track.kind} track`);
+        });
+        streamRef.current = null;
+        
+        // Clear video element
+        if (userVideoRef.current) {
+          userVideoRef.current.srcObject = null;
+        }
+        console.log('✅ Camera and microphone IMMEDIATELY disconnected');
+      }
+      
+      // Step 2: Stop recording
       setIsRecording(false);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
@@ -382,7 +445,7 @@ const Interview = () => {
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
       
-      // Step 2: Capture final conversation data
+      // Step 3: Capture final conversation data
       const finalTranscript = conversationTranscriptRef.current;
       const finalMetrics = speechMetricsRef.current;
       
@@ -401,24 +464,8 @@ const Interview = () => {
       localStorage.setItem(`session_${conversationId}`, JSON.stringify(sessionData));
       console.log('📊 Final session data stored');
       
-      // Step 3: Trigger download and store recording
+      // Step 4: Trigger download and store recording
       await triggerDownload();
-      
-      // Step 4: Stop all media tracks IMMEDIATELY (turn off camera light)
-      if (streamRef.current) {
-        console.log('Stopping all media tracks...');
-        streamRef.current.getTracks().forEach(track => {
-          track.stop();
-          console.log(`Stopped ${track.kind} track`);
-        });
-        streamRef.current = null;
-        
-        // Clear video element
-        if (userVideoRef.current) {
-          userVideoRef.current.srcObject = null;
-        }
-        console.log('✅ Camera and microphone disconnected');
-      }
       
       // Step 5: Cleanup audio analysis
       if (audioContextRef.current) {
@@ -612,6 +659,7 @@ const Interview = () => {
                 <div className="space-y-4">
                   <div className="bg-black rounded-lg aspect-video">
                     <iframe
+                      ref={iframeRef}
                       src={conversationUrl}
                       className="w-full h-full rounded-lg"
                       allow="camera; microphone"
@@ -720,7 +768,7 @@ const Interview = () => {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera:</span>
-                  <span className="text-green-500 font-medium">
+                  <span className={`font-medium ${streamRef.current ? 'text-green-500' : 'text-red-500'}`}>
                     {streamRef.current ? 'Active' : 'Disconnected'}
                   </span>
                 </div>

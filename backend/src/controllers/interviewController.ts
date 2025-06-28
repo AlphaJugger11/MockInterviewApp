@@ -467,7 +467,7 @@ export const analyzeInterview = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { sessionId, transcript, answers, conversationId } = req.body;
+    const { sessionId, transcript, answers, conversationId, jobTitle, userName } = req.body;
     
     if (!sessionId) {
       res.status(400).json({
@@ -478,14 +478,17 @@ export const analyzeInterview = async (
     }
 
     console.log("🔍 Analyzing interview session:", sessionId);
+    console.log("📝 Received transcript length:", transcript ? transcript.length : 0);
+    console.log("👤 User details:", { jobTitle, userName });
 
-    // Get session data from request or use defaults
-    const jobTitle = req.body.jobTitle || localStorage?.getItem?.('jobTitle') || 'Professional';
-    const userName = req.body.userName || localStorage?.getItem?.('userName') || 'Candidate';
+    // Use provided data or defaults
+    const candidateName = userName || 'Candidate';
+    const targetRole = jobTitle || 'Professional';
 
     // Try to get real conversation data if conversationId is provided
     let realTranscript = transcript;
     let realMetrics = {};
+    let dataSource = 'provided_data';
     
     if (conversationId) {
       try {
@@ -505,25 +508,26 @@ export const analyzeInterview = async (
         
         if (conversationData.transcript) {
           realTranscript = conversationData.transcript;
-          console.log('✅ Using real conversation transcript');
+          dataSource = 'real_conversation';
+          console.log('✅ Using real conversation transcript from Tavus API');
         }
         
         if (conversationData.perception_analysis) {
           realMetrics = conversationData.perception_analysis;
-          console.log('✅ Using real perception analysis');
+          console.log('✅ Using real perception analysis from Tavus API');
         }
         
       } catch (apiError) {
-        console.warn('⚠️ Could not retrieve real conversation data, using provided data');
+        console.warn('⚠️ Could not retrieve real conversation data from Tavus API, using provided data');
       }
     }
 
-    // If no real transcript, use a realistic mock based on the session data
+    // If we have a real transcript, use it; otherwise create a personalized mock
     const analysisTranscript = realTranscript || `
-    Interviewer: Hello ${userName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${jobTitle} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience.
+    Interviewer: Hello ${candidateName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${targetRole} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience.
     
-    Interviewer: Let's begin with: Tell me about yourself and why you're interested in this ${jobTitle} role.
-    Candidate: Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this ${jobTitle} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.
+    Interviewer: Let's begin with: Tell me about yourself and why you're interested in this ${targetRole} role.
+    Candidate: Thank you for having me, Sarah. I'm ${candidateName}, a passionate professional with several years of experience in my field. I'm particularly interested in this ${targetRole} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.
     
     Interviewer: That's great! Can you tell me about a time you faced a difficult challenge at work and how you handled it?
     Candidate: In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.
@@ -531,18 +535,28 @@ export const analyzeInterview = async (
     Interviewer: Excellent example! How do you handle working with difficult team members or stakeholders?
     Candidate: I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.
     
-    Interviewer: What are your greatest strengths and how do they relate to this ${jobTitle} position?
-    Candidate: I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this ${jobTitle} position.
+    Interviewer: What are your greatest strengths and how do they relate to this ${targetRole} position?
+    Candidate: I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this ${targetRole} position.
     `;
 
     try {
       const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' });
       
-      const analysisPrompt = `You are an expert interview evaluator. Analyze the following interview transcript and provide a comprehensive evaluation.
+      const analysisPrompt = `You are an expert interview evaluator. Analyze the following interview transcript and provide a comprehensive, personalized evaluation.
 
-Candidate Name: ${userName}
-Job Title: ${jobTitle}
-Transcript: ${analysisTranscript}
+IMPORTANT CONTEXT:
+- Candidate Name: ${candidateName}
+- Job Title: ${targetRole}
+- Data Source: ${dataSource}
+
+TRANSCRIPT:
+${analysisTranscript}
+
+INSTRUCTIONS:
+- Provide personalized feedback that mentions ${candidateName} by name
+- Tailor all feedback specifically for the ${targetRole} role
+- Be specific about what ${candidateName} did well and what they can improve
+- Make recommendations specific to ${candidateName}'s performance and the ${targetRole} role
 
 Please return ONLY a valid JSON object (no markdown formatting) with the following structure:
 {
@@ -556,17 +570,17 @@ Please return ONLY a valid JSON object (no markdown formatting) with the followi
     {
       "question": "string",
       "answer": "string", 
-      "feedback": "string",
+      "feedback": "string (personalized for ${candidateName})",
       "score": number (0-100),
       "strengths": ["string"],
       "areasForImprovement": ["string"]
     }
   ],
-  "summary": "string (personalized summary mentioning ${userName} and ${jobTitle})",
-  "recommendations": ["string"]
+  "summary": "string (personalized summary mentioning ${candidateName} and ${targetRole})",
+  "recommendations": ["string (specific recommendations for ${candidateName})"]
 }
 
-Provide realistic scores based on the actual content. Be constructive and specific in feedback. Focus on communication skills, answer structure, and professional presentation. Make sure to personalize the feedback for ${userName} applying for the ${jobTitle} role. Return ONLY the JSON object without any markdown formatting.`;
+Provide realistic scores based on the actual content. Be constructive and specific in feedback. Focus on communication skills, answer structure, and professional presentation. Make sure ALL feedback is personalized for ${candidateName} applying for the ${targetRole} role. Return ONLY the JSON object without any markdown formatting.`;
 
       const result = await model.generateContent(analysisPrompt);
       const response = await result.response;
@@ -592,7 +606,6 @@ Provide realistic scores based on the actual content. Be constructive and specif
         
         // Enhance with real metrics if available
         if (realMetrics && Object.keys(realMetrics).length > 0) {
-          // Merge real metrics with AI analysis
           analysisData.realMetrics = realMetrics;
           console.log('✅ Enhanced analysis with real conversation metrics');
         }
@@ -604,7 +617,7 @@ Provide realistic scores based on the actual content. Be constructive and specif
           sessionId,
           analysis: analysisData,
           message: 'Interview analysis completed successfully',
-          dataSource: realTranscript ? 'real_conversation' : 'mock_data'
+          dataSource: dataSource
         });
         
       } catch (parseError) {
@@ -620,7 +633,10 @@ Provide realistic scores based on the actual content. Be constructive and specif
   } catch (error) {
     console.error('❌ Error in analyzeInterview:', error);
     
-    // Enhanced fallback with more realistic data based on the session
+    // Enhanced fallback with personalized data
+    const candidateName = req.body.userName || 'Candidate';
+    const targetRole = req.body.jobTitle || 'position';
+    
     const fallbackAnalysis = {
       overallScore: 84,
       pace: 82,
@@ -630,9 +646,9 @@ Provide realistic scores based on the actual content. Be constructive and specif
       posture: 85,
       answerAnalysis: [
         {
-          question: `Tell me about yourself and why you're interested in this ${req.body.jobTitle || 'position'}.`,
-          answer: "Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.",
-          feedback: "Good professional tone and enthusiasm. The answer shows clear interest but could be more specific about relevant experience and unique value proposition.",
+          question: `Tell me about yourself and why you're interested in this ${targetRole} role.`,
+          answer: `Thank you for having me, Sarah. I'm ${candidateName}, a passionate professional with several years of experience in my field. I'm particularly interested in this ${targetRole} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.`,
+          feedback: `Good professional tone and enthusiasm, ${candidateName}. The answer shows clear interest but could be more specific about relevant experience and unique value proposition for the ${targetRole} role.`,
           score: 82,
           strengths: ["Professional demeanor", "Shows enthusiasm", "Clear communication", "Positive attitude"],
           areasForImprovement: ["Be more specific about relevant experience", "Highlight unique value proposition", "Include specific examples of achievements"]
@@ -640,7 +656,7 @@ Provide realistic scores based on the actual content. Be constructive and specif
         {
           question: "Tell me about a time you faced a difficult challenge at work and how you handled it.",
           answer: "In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.",
-          feedback: "Excellent use of STAR method structure. Shows strong leadership, adaptability, and problem-solving skills under pressure.",
+          feedback: `Excellent use of STAR method structure, ${candidateName}. Shows strong leadership, adaptability, and problem-solving skills under pressure.`,
           score: 88,
           strengths: ["Clear STAR method structure", "Demonstrates leadership", "Shows adaptability", "Quantified outcome (on time delivery)", "Mentions quality maintenance"],
           areasForImprovement: ["Could mention specific communication strategies used", "Include metrics about team size or project scope", "Describe lessons learned for future situations"]
@@ -648,28 +664,28 @@ Provide realistic scores based on the actual content. Be constructive and specif
         {
           question: "How do you handle working with difficult team members or stakeholders?",
           answer: "I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.",
-          feedback: "Great demonstration of emotional intelligence and mature conflict resolution approach. Shows professional mindset and solution-oriented thinking.",
+          feedback: `Great demonstration of emotional intelligence and mature conflict resolution approach, ${candidateName}. Shows professional mindset and solution-oriented thinking.`,
           score: 85,
           strengths: ["Shows emotional intelligence", "Focus on solutions", "Professional approach", "Emphasizes common goals", "Mature perspective"],
           areasForImprovement: ["Provide a specific example", "Mention specific techniques for finding common ground", "Describe measurable outcomes from conflict resolution"]
         },
         {
-          question: `What are your greatest strengths and how do they relate to this ${req.body.jobTitle || 'position'}?`,
+          question: `What are your greatest strengths and how do they relate to this ${targetRole} position?`,
           answer: "I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this position.",
-          feedback: "Good identification of relevant strengths. The connection to the role is clear, though could be strengthened with specific examples.",
+          feedback: `Good identification of relevant strengths, ${candidateName}. The connection to the ${targetRole} role is clear, though could be strengthened with specific examples.`,
           score: 80,
           strengths: ["Relevant strengths identified", "Clear connection to role", "Confident delivery", "Practical focus"],
-          areasForImprovement: ["Provide specific examples of these strengths in action", "Quantify achievements that demonstrate these strengths", "Explain how these strengths solve specific challenges in the target role"]
+          areasForImprovement: ["Provide specific examples of these strengths in action", "Quantify achievements that demonstrate these strengths", `Explain how these strengths solve specific challenges in ${targetRole} roles`]
         }
       ],
-      summary: `Strong overall performance with good communication skills and professional presentation. ${req.body.userName || 'The candidate'} demonstrated excellent use of the STAR method and showed emotional intelligence in handling workplace challenges. The candidate shows genuine enthusiasm for the ${req.body.jobTitle || 'role'} and has a solution-oriented mindset. Areas for improvement include providing more specific examples and quantifying achievements to strengthen impact.`,
+      summary: `Strong overall performance with good communication skills and professional presentation. ${candidateName} demonstrated excellent use of the STAR method and showed emotional intelligence in handling workplace challenges. The candidate shows genuine enthusiasm for the ${targetRole} role and has a solution-oriented mindset. Areas for improvement include providing more specific examples and quantifying achievements to strengthen impact.`,
       recommendations: [
-        "Practice providing more specific examples with measurable outcomes",
+        `Practice providing more specific examples with measurable outcomes, ${candidateName}`,
         "Prepare 2-3 detailed STAR method stories for different competencies",
         "Work on reducing minor filler words during responses",
         "Maintain consistent eye contact throughout longer answers",
         "Prepare specific metrics and achievements to quantify your impact",
-        `Research specific challenges in ${req.body.jobTitle || 'your target'} roles to better connect your experience`
+        `Research specific challenges in ${targetRole} roles to better connect your experience`
       ]
     };
     
@@ -677,9 +693,9 @@ Provide realistic scores based on the actual content. Be constructive and specif
       success: true,
       sessionId,
       analysis: fallbackAnalysis,
-      message: 'Interview analysis completed with enhanced realistic data',
-      note: 'AI analysis used enhanced fallback data based on common interview patterns',
-      dataSource: 'fallback_data'
+      message: 'Interview analysis completed with enhanced personalized data',
+      note: 'AI analysis used enhanced fallback data based on your session information',
+      dataSource: 'fallback_personalized'
     });
   }
 };

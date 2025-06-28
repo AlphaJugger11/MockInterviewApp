@@ -21,6 +21,7 @@ interface AnalysisData {
   summary: string;
   recommendations: string[];
   realMetrics?: any;
+  dataSource?: string;
 }
 
 const Feedback = () => {
@@ -61,25 +62,30 @@ const Feedback = () => {
         const storedSession = localStorage.getItem(`session_${sessionData.conversationId}`);
         
         let realTranscript = null;
-        let realMetrics = null;
+        let realAnswers: string[] = [];
         
         if (storedTranscript) {
           const transcriptData = JSON.parse(storedTranscript);
-          // Convert transcript events to readable format
-          realTranscript = transcriptData.map((event: any) => 
-            `${event.participant === 'ai' ? 'Interviewer' : 'Candidate'}: ${event.content}`
-          ).join('\n\n');
-          console.log('✅ Using stored conversation transcript');
-        }
-        
-        if (storedMetrics) {
-          realMetrics = JSON.parse(storedMetrics);
-          console.log('✅ Using stored conversation metrics');
-        }
-        
-        if (storedSession) {
-          const sessionInfo = JSON.parse(storedSession);
-          console.log('✅ Using stored session data:', sessionInfo);
+          console.log('📝 Raw transcript data:', transcriptData);
+          
+          // Extract actual conversation content
+          const conversationEvents = transcriptData.filter((event: any) => 
+            event.type === 'conversation' || event.type === 'message'
+          );
+          
+          // Build readable transcript
+          realTranscript = conversationEvents.map((event: any) => {
+            const speaker = event.participant === 'ai' || event.participant === 'system' ? 'Interviewer' : 'Candidate';
+            return `${speaker}: ${event.content}`;
+          }).join('\n\n');
+          
+          // Extract candidate answers
+          realAnswers = conversationEvents
+            .filter((event: any) => event.participant !== 'ai' && event.participant !== 'system')
+            .map((event: any) => event.content);
+          
+          console.log('✅ Using stored conversation transcript with', conversationEvents.length, 'events');
+          console.log('📄 Real transcript preview:', realTranscript.substring(0, 200) + '...');
         }
         
         // Call the analyze endpoint with real conversation data
@@ -92,7 +98,7 @@ const Feedback = () => {
             transcript: realTranscript,
             jobTitle: sessionData.role,
             userName: sessionData.userName,
-            answers: realTranscript ? realTranscript.split('Candidate:').slice(1) : []
+            answers: realAnswers
           }),
         });
 
@@ -100,6 +106,7 @@ const Feedback = () => {
           const data = await response.json();
           setAnalysisData(data.analysis);
           console.log('✅ Analysis data source:', data.dataSource);
+          console.log('📊 Analysis data:', data.analysis);
         } else {
           throw new Error('Failed to fetch analysis');
         }
@@ -118,8 +125,8 @@ const Feedback = () => {
           answerAnalysis: [
             {
               question: `Tell me about yourself and why you're interested in this ${sessionData.role} role.`,
-              answer: "Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.",
-              feedback: "Good professional tone and enthusiasm. The answer shows clear interest but could be more specific about relevant experience and unique value proposition.",
+              answer: `Thank you for having me, Sarah. I'm ${sessionData.userName}, a passionate professional with several years of experience in my field. I'm particularly interested in this ${sessionData.role} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.`,
+              feedback: `Good professional tone and enthusiasm, ${sessionData.userName}. The answer shows clear interest but could be more specific about relevant experience and unique value proposition for the ${sessionData.role} role.`,
               score: 82,
               strengths: ["Professional demeanor", "Shows enthusiasm", "Clear communication", "Positive attitude"],
               areasForImprovement: ["Be more specific about relevant experience", "Highlight unique value proposition", "Include specific examples of achievements"]
@@ -127,7 +134,7 @@ const Feedback = () => {
             {
               question: "Tell me about a time you faced a difficult challenge at work and how you handled it.",
               answer: "In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.",
-              feedback: "Excellent use of STAR method structure. Shows strong leadership, adaptability, and problem-solving skills under pressure.",
+              feedback: `Excellent use of STAR method structure, ${sessionData.userName}. Shows strong leadership, adaptability, and problem-solving skills under pressure.`,
               score: 88,
               strengths: ["Clear STAR method structure", "Demonstrates leadership", "Shows adaptability", "Quantified outcome (on time delivery)", "Mentions quality maintenance"],
               areasForImprovement: ["Could mention specific communication strategies used", "Include metrics about team size or project scope", "Describe lessons learned for future situations"]
@@ -135,7 +142,7 @@ const Feedback = () => {
             {
               question: "How do you handle working with difficult team members or stakeholders?",
               answer: "I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.",
-              feedback: "Great demonstration of emotional intelligence and mature conflict resolution approach. Shows professional mindset and solution-oriented thinking.",
+              feedback: `Great demonstration of emotional intelligence and mature conflict resolution approach, ${sessionData.userName}. Shows professional mindset and solution-oriented thinking.`,
               score: 85,
               strengths: ["Shows emotional intelligence", "Focus on solutions", "Professional approach", "Emphasizes common goals", "Mature perspective"],
               areasForImprovement: ["Provide a specific example", "Mention specific techniques for finding common ground", "Describe measurable outcomes from conflict resolution"]
@@ -143,10 +150,10 @@ const Feedback = () => {
             {
               question: `What are your greatest strengths and how do they relate to this ${sessionData.role} position?`,
               answer: "I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this position.",
-              feedback: "Good identification of relevant strengths. The connection to the role is clear, though could be strengthened with specific examples.",
+              feedback: `Good identification of relevant strengths, ${sessionData.userName}. The connection to the ${sessionData.role} role is clear, though could be strengthened with specific examples.`,
               score: 80,
               strengths: ["Relevant strengths identified", "Clear connection to role", "Confident delivery", "Practical focus"],
-              areasForImprovement: ["Provide specific examples of these strengths in action", "Quantify achievements that demonstrate these strengths", "Explain how these strengths solve specific challenges in the target role"]
+              areasForImprovement: ["Provide specific examples of these strengths in action", "Quantify achievements that demonstrate these strengths", `Explain how these strengths solve specific challenges in ${sessionData.role} roles`]
             }
           ],
           summary: `Strong overall performance with good communication skills and professional presentation. ${sessionData.userName} demonstrated excellent use of the STAR method and showed emotional intelligence in handling workplace challenges. The candidate shows genuine enthusiasm for the ${sessionData.role} role and has a solution-oriented mindset. Areas for improvement include providing more specific examples and quantifying achievements to strengthen impact.`,
@@ -157,7 +164,8 @@ const Feedback = () => {
             "Maintain consistent eye contact throughout longer answers",
             "Prepare specific metrics and achievements to quantify your impact",
             `Research specific challenges in ${sessionData.role} roles to better connect your experience`
-          ]
+          ],
+          dataSource: 'fallback_personalized'
         });
       } finally {
         setLoading(false);
@@ -267,7 +275,7 @@ const Feedback = () => {
                         if (storedRecording) {
                           const link = document.createElement('a');
                           link.href = storedRecording;
-                          link.download = `interview-recording-${sessionData.conversationId}.webm`;
+                          link.download = `interview-recording-${sessionData.conversationId}.mp4`;
                           link.click();
                         }
                       }}
@@ -292,10 +300,10 @@ const Feedback = () => {
                 {analysisData.summary}
               </p>
               
-              {analysisData.realMetrics && (
+              {analysisData.dataSource === 'real_conversation' && (
                 <div className="mb-4 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
                   <p className="text-green-600 dark:text-green-400 text-sm font-medium">
-                    ✅ This analysis includes real conversation data and metrics from your interview session
+                    ✅ This analysis is based on your actual conversation transcript and real-time metrics
                   </p>
                 </div>
               )}
@@ -391,7 +399,7 @@ const Feedback = () => {
                 <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary text-sm">
                   {metric.description}
                 </p>
-                {analysisData.realMetrics && (
+                {analysisData.dataSource === 'real_conversation' && (
                   <p className="text-xs text-green-600 dark:text-green-400 mt-2">
                     ✅ Real data
                   </p>
@@ -418,7 +426,7 @@ const Feedback = () => {
                 <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
                   {metric.description}
                 </p>
-                {analysisData.realMetrics && (
+                {analysisData.dataSource === 'real_conversation' && (
                   <p className="text-xs text-green-600 dark:text-green-400 mt-2">
                     ✅ Real data
                   </p>
@@ -463,9 +471,9 @@ const Feedback = () => {
               </h2>
               <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
                 {analysisData ? 
-                  (analysisData.overallScore >= 85 ? 'Excellent job! You performed very well in most areas.' :
-                   analysisData.overallScore >= 75 ? 'Great job! You scored above average in most areas.' :
-                   'Good effort! There are several areas where you can improve.') :
+                  (analysisData.overallScore >= 85 ? `Excellent job, ${sessionData.userName}! You performed very well in most areas.` :
+                   analysisData.overallScore >= 75 ? `Great job, ${sessionData.userName}! You scored above average in most areas.` :
+                   `Good effort, ${sessionData.userName}! There are several areas where you can improve.`) :
                   'Analyzing your performance...'
                 }
               </p>
