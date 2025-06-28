@@ -1,16 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { SkipForward, Square, Mic, MicOff, Video, VideoOff, Download, AlertCircle } from 'lucide-react';
+import { Square, Mic, MicOff, Video, VideoOff, Download, AlertCircle } from 'lucide-react';
+// @ts-ignore
+import muxjs from 'mux.js';
 
 const Interview = () => {
   const navigate = useNavigate();
-  const [currentQuestion, setCurrentQuestion] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [conversationUrl, setConversationUrl] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionDuration, setSessionDuration] = useState(0);
+  const [userName, setUserName] = useState<string>('');
 
   // Recording refs and state
   const userVideoRef = useRef<HTMLVideoElement>(null);
@@ -20,13 +23,18 @@ const Interview = () => {
   const sessionStartTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
-    // Get the conversation URL from localStorage
+    // Get the conversation data from localStorage
     const url = localStorage.getItem('conversationUrl');
-    if (url) {
+    const id = localStorage.getItem('conversationId');
+    const name = localStorage.getItem('userName') || 'User';
+    
+    if (url && id) {
       setConversationUrl(url);
-      console.log('Loaded conversation URL:', url);
+      setConversationId(id);
+      setUserName(name);
+      console.log('Loaded conversation:', { url, id, name });
     } else {
-      console.error("No conversation URL found. Navigating back to setup.");
+      console.error("No conversation data found. Navigating back to setup.");
       setError("No interview session found. Please set up a new interview.");
       setTimeout(() => navigate('/setup'), 3000);
       return;
@@ -46,9 +54,9 @@ const Interview = () => {
           userVideoRef.current.srcObject = stream;
         }
 
-        // Initialize MediaRecorder
+        // Initialize MediaRecorder for WebM format
         const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'video/webm;codecs=vp9'
+          mimeType: 'video/webm;codecs=vp9,opus'
         });
         
         mediaRecorderRef.current = mediaRecorder;
@@ -89,7 +97,7 @@ const Interview = () => {
     };
   }, [navigate]);
 
-  // Function to trigger download
+  // Enhanced function to convert WebM to MP4 and trigger download
   const triggerDownload = () => {
     if (recordedChunksRef.current.length === 0) {
       console.log('No recorded data to download');
@@ -102,34 +110,149 @@ const Interview = () => {
         mediaRecorderRef.current.stop();
       }
 
-      // Create blob and download
-      const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
+      // Create WebM blob
+      const webmBlob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
       
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+      // Convert WebM to MP4 using mux.js
+      const reader = new FileReader();
+      reader.onload = function() {
+        try {
+          const arrayBuffer = reader.result as ArrayBuffer;
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          // Use mux.js to remux WebM to MP4
+          const transmuxer = new muxjs.mp4.Transmuxer();
+          const mp4Segments: Uint8Array[] = [];
+          
+          transmuxer.on('data', (segment: any) => {
+            mp4Segments.push(new Uint8Array(segment.initSegment));
+            mp4Segments.push(new Uint8Array(segment.data));
+          });
+          
+          transmuxer.on('done', () => {
+            // Combine all segments into a single MP4 blob
+            const mp4Blob = new Blob(mp4Segments, { type: 'video/mp4' });
+            
+            // Create download link for MP4
+            const url = URL.createObjectURL(mp4Blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.mp4`;
+            
+            document.body.appendChild(a);
+            a.click();
+            
+            // Cleanup
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            console.log('MP4 download triggered successfully');
+          });
+          
+          // Push WebM data to transmuxer
+          transmuxer.push(uint8Array);
+          transmuxer.flush();
+          
+        } catch (conversionError) {
+          console.error('Error converting to MP4, falling back to WebM:', conversionError);
+          
+          // Fallback: download as WebM if conversion fails
+          const url = URL.createObjectURL(webmBlob);
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = url;
+          a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+          
+          document.body.appendChild(a);
+          a.click();
+          
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          
+          console.log('WebM download triggered as fallback');
+        }
+      };
       
-      document.body.appendChild(a);
-      a.click();
+      reader.readAsArrayBuffer(webmBlob);
       
-      // Cleanup
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      console.log('Download triggered successfully');
     } catch (error) {
       console.error('Error triggering download:', error);
       setError('Failed to download recording. Please try again.');
     }
   };
 
-  // Handle automatic download on page unload/crash
+  // Enhanced session cleanup with proper order
+  const handleEndSession = async () => {
+    console.log('🛑 Ending interview session...');
+    setIsRecording(false);
+    
+    try {
+      // Step 1: Stop recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      
+      // Step 2: Trigger download
+      triggerDownload();
+      
+      // Step 3: Stop all media tracks (turn off camera light)
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+          console.log(`Stopped ${track.kind} track`);
+        });
+      }
+      
+      // Step 4: End conversation on backend to stop credit usage
+      if (conversationId) {
+        try {
+          const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationId }),
+          });
+          
+          if (response.ok) {
+            console.log('✅ Conversation ended successfully on backend');
+          } else {
+            console.warn('⚠️ Failed to end conversation on backend, but continuing...');
+          }
+        } catch (endError) {
+          console.warn('⚠️ Error ending conversation on backend:', endError);
+        }
+      }
+      
+      // Step 5: Clean up localStorage and navigate
+      localStorage.removeItem('conversationUrl');
+      localStorage.removeItem('conversationId');
+      localStorage.removeItem('userName');
+      
+      // Navigate to feedback page after a short delay
+      setTimeout(() => {
+        navigate('/feedback/1');
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error during session cleanup:', error);
+      setError('Error ending session. Please try again.');
+    }
+  };
+
+  // Handle unexpected tab close with beacon
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // Use sendBeacon for reliable cleanup on tab close
+      if (conversationId) {
+        navigator.sendBeacon(
+          'http://localhost:3001/api/interview/end-conversation',
+          JSON.stringify({ conversationId })
+        );
+      }
+      
+      // Trigger download before leaving
       triggerDownload();
-      // Optional: Show confirmation dialog
+      
       event.preventDefault();
       event.returnValue = '';
     };
@@ -139,27 +262,7 @@ const Interview = () => {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, []);
-
-  const handleEndSession = () => {
-    setIsRecording(false);
-    
-    // Stop recording and trigger download
-    triggerDownload();
-    
-    // Stop all media tracks
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-    }
-    
-    // Clear conversation URL from localStorage
-    localStorage.removeItem('conversationUrl');
-    
-    // Navigate to feedback page after a short delay to ensure download starts
-    setTimeout(() => {
-      navigate('/feedback/1');
-    }, 1000);
-  };
+  }, [conversationId]);
 
   const toggleMute = () => {
     if (streamRef.current) {
@@ -168,6 +271,7 @@ const Interview = () => {
         track.enabled = isMuted;
       });
       setIsMuted(!isMuted);
+      console.log(`Audio ${isMuted ? 'enabled' : 'disabled'}`);
     }
   };
 
@@ -178,6 +282,7 @@ const Interview = () => {
         track.enabled = !isVideoOn;
       });
       setIsVideoOn(!isVideoOn);
+      console.log(`Video ${isVideoOn ? 'disabled' : 'enabled'}`);
     }
   };
 
@@ -239,75 +344,8 @@ const Interview = () => {
       
       <div className="max-w-6xl mx-auto p-8">
         <div className="grid lg:grid-cols-3 gap-8 h-full">
-          {/* Main Video Area */}
+          {/* Main AI Interviewer Area - Now the large area */}
           <div className="lg:col-span-2 space-y-6">
-            {/* User Video */}
-            <div className="relative bg-black rounded-2xl overflow-hidden aspect-video">
-              <video 
-                ref={userVideoRef} 
-                autoPlay 
-                playsInline 
-                muted 
-                className="w-full h-full object-cover" 
-              />
-              
-              {!isVideoOn && (
-                <div className="absolute inset-0 bg-black flex items-center justify-center">
-                  <div className="text-center">
-                    <VideoOff className="h-16 w-16 text-white/50 mx-auto mb-4" />
-                    <p className="text-white/70">Camera is off</p>
-                  </div>
-                </div>
-              )}
-              
-              {/* Video Controls Overlay */}
-              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
-                <div className="flex items-center space-x-4 bg-black/50 backdrop-blur-sm rounded-full px-6 py-3">
-                  <button
-                    onClick={toggleMute}
-                    className={`p-3 rounded-full transition-colors ${
-                      isMuted 
-                        ? 'bg-red-500 hover:bg-red-600' 
-                        : 'bg-white/20 hover:bg-white/30'
-                    }`}
-                  >
-                    {isMuted ? (
-                      <MicOff className="h-5 w-5 text-white" />
-                    ) : (
-                      <Mic className="h-5 w-5 text-white" />
-                    )}
-                  </button>
-                  
-                  <button
-                    onClick={toggleVideo}
-                    className={`p-3 rounded-full transition-colors ${
-                      !isVideoOn 
-                        ? 'bg-red-500 hover:bg-red-600' 
-                        : 'bg-white/20 hover:bg-white/30'
-                    }`}
-                  >
-                    {!isVideoOn ? (
-                      <VideoOff className="h-5 w-5 text-white" />
-                    ) : (
-                      <Video className="h-5 w-5 text-white" />
-                    )}
-                  </button>
-
-                  <button
-                    onClick={triggerDownload}
-                    className="p-3 rounded-full bg-white/20 hover:bg-white/30 transition-colors"
-                    title="Download Recording"
-                  >
-                    <Download className="h-5 w-5 text-white" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* AI Interviewer */}
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
                 AI Interviewer
@@ -324,7 +362,7 @@ const Interview = () => {
                     />
                   </div>
                   <p className="text-center text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                    Your AI interviewer is ready to begin
+                    Your AI interviewer Sarah is ready to begin with {userName}
                   </p>
                 </div>
               ) : (
@@ -335,6 +373,70 @@ const Interview = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Sidebar with User Video and Controls */}
+          <div className="space-y-6">
+            {/* User Video Preview - Now in sidebar */}
+            <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
+              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
+                Your Video
+              </h3>
+              
+              <div className="relative bg-black rounded-lg aspect-video overflow-hidden">
+                <video 
+                  ref={userVideoRef} 
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  className="w-full h-full object-cover" 
+                />
+                
+                {!isVideoOn && (
+                  <div className="absolute inset-0 bg-black flex items-center justify-center">
+                    <div className="text-center">
+                      <VideoOff className="h-8 w-8 text-white/50 mx-auto mb-2" />
+                      <p className="text-white/70 text-sm">Camera is off</p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Video Controls */}
+                <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2">
+                  <div className="flex items-center space-x-2 bg-black/50 backdrop-blur-sm rounded-full px-3 py-2">
+                    <button
+                      onClick={toggleMute}
+                      className={`p-2 rounded-full transition-colors ${
+                        isMuted 
+                          ? 'bg-red-500 hover:bg-red-600' 
+                          : 'bg-white/20 hover:bg-white/30'
+                      }`}
+                    >
+                      {isMuted ? (
+                        <MicOff className="h-3 w-3 text-white" />
+                      ) : (
+                        <Mic className="h-3 w-3 text-white" />
+                      )}
+                    </button>
+                    
+                    <button
+                      onClick={toggleVideo}
+                      className={`p-2 rounded-full transition-colors ${
+                        !isVideoOn 
+                          ? 'bg-red-500 hover:bg-red-600' 
+                          : 'bg-white/20 hover:bg-white/30'
+                      }`}
+                    >
+                      {!isVideoOn ? (
+                        <VideoOff className="h-3 w-3 text-white" />
+                      ) : (
+                        <Video className="h-3 w-3 text-white" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Interview Controls */}

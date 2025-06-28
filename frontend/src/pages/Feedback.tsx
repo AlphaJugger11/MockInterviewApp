@@ -1,27 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Share2, Play, TrendingUp, Eye, Mic, MessageSquare } from 'lucide-react';
 import Layout from '../components/Layout';
-import { mockQuestions } from '../data/mockData';
+
+interface AnalysisData {
+  overallScore: number;
+  pace: number;
+  fillerWords: number;
+  clarity: number;
+  eyeContact: number;
+  posture: number;
+  answerAnalysis: Array<{
+    question: string;
+    answer: string;
+    feedback: string;
+    score: number;
+    strengths: string[];
+    areasForImprovement: string[];
+  }>;
+  summary: string;
+  recommendations: string[];
+}
 
 const Feedback = () => {
   const { id } = useParams();
   const [activeTab, setActiveTab] = useState('summary');
+  const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const overallScore = 82;
   const sessionData = {
-    role: 'Senior Frontend Developer',
+    role: localStorage.getItem('jobTitle') || 'Senior Frontend Developer',
     company: 'Netflix',
-    date: '2024-01-15',
+    date: new Date().toISOString().split('T')[0],
     duration: '45 min',
-  };
-
-  const metrics = {
-    pace: 85,
-    fillerWords: 72,
-    clarity: 88,
-    eyeContact: 79,
-    posture: 83,
   };
 
   const tabs = [
@@ -31,7 +43,129 @@ const Feedback = () => {
     { id: 'body', label: 'Body Language', icon: Eye },
   ];
 
+  useEffect(() => {
+    const fetchAnalysis = async () => {
+      try {
+        setLoading(true);
+        
+        // Simulate API call to analyze interview
+        const response = await fetch('http://localhost:3001/api/interview/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: id,
+            transcript: "Mock interview transcript for analysis",
+            answers: ["Sample answer 1", "Sample answer 2"]
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setAnalysisData(data.analysis);
+        } else {
+          throw new Error('Failed to fetch analysis');
+        }
+      } catch (err) {
+        console.error('Error fetching analysis:', err);
+        setError('Failed to load interview analysis');
+        
+        // Use fallback data
+        setAnalysisData({
+          overallScore: 82,
+          pace: 85,
+          fillerWords: 72,
+          clarity: 88,
+          eyeContact: 79,
+          posture: 83,
+          answerAnalysis: [
+            {
+              question: "Tell me about a time you faced a difficult challenge at work.",
+              answer: "I was leading a project with a tight deadline when our main developer left unexpectedly...",
+              feedback: "Good use of STAR method. Clear situation and task description.",
+              score: 85,
+              strengths: ["Clear structure", "Specific examples", "Quantified results"],
+              areasForImprovement: ["Could be more concise", "Add more emotional intelligence elements"]
+            },
+            {
+              question: "Describe a situation where you had to work with a difficult team member.",
+              answer: "In my previous role, I worked with a colleague who was resistant to feedback...",
+              feedback: "Excellent demonstration of conflict resolution skills.",
+              score: 88,
+              strengths: ["Diplomatic approach", "Focus on solutions", "Professional tone"],
+              areasForImprovement: ["Could include more specific outcomes"]
+            }
+          ],
+          summary: "Strong performance with good technical knowledge and communication skills. Focus on reducing filler words and maintaining consistent eye contact.",
+          recommendations: ["Practice the STAR method more", "Work on reducing 'um' and 'uh'", "Maintain better eye contact"]
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAnalysis();
+  }, [id]);
+
+  const renderCircularProgress = (value: number, size: 'small' | 'large' = 'large') => {
+    const radius = size === 'large' ? 15.9155 : 12;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDasharray = `${value}, 100`;
+    
+    return (
+      <div className={`relative ${size === 'large' ? 'w-32 h-32' : 'w-24 h-24'}`}>
+        <svg className={`${size === 'large' ? 'w-32 h-32' : 'w-24 h-24'} transform -rotate-90`} viewBox="0 0 36 36">
+          <path
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+            fill="none"
+            stroke="#e5e7eb"
+            strokeWidth={size === 'large' ? "3" : "2"}
+          />
+          <path
+            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={size === 'large' ? "3" : "2"}
+            strokeDasharray={strokeDasharray}
+            className="text-light-accent dark:text-dark-accent"
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="text-center">
+            <span className={`${size === 'large' ? 'text-3xl' : 'text-2xl'} font-bold text-light-text-primary dark:text-dark-text-primary`}>
+              {value}%
+            </span>
+            {size === 'large' && (
+              <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
+                / 100
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderTabContent = () => {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="w-8 h-8 border-4 border-light-accent dark:border-dark-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-light-text-secondary dark:text-dark-text-secondary">Loading analysis...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (error || !analysisData) {
+      return (
+        <div className="text-center py-12">
+          <p className="text-red-500 mb-4">{error || 'No analysis data available'}</p>
+          <p className="text-light-text-secondary dark:text-dark-text-secondary">Using sample data for demonstration</p>
+        </div>
+      );
+    }
+
     switch (activeTab) {
       case 'summary':
         return (
@@ -57,13 +191,20 @@ const Feedback = () => {
 
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary mb-4">
-                Overall Summary
+                AI Analysis Summary
               </h3>
-              <p className="font-inter text-light-text-primary dark:text-dark-text-primary leading-relaxed">
-                You demonstrated strong technical knowledge and communication skills throughout the interview. 
-                Your answers were well-structured and showed good understanding of the role requirements. 
-                There are opportunities to improve in reducing filler words and maintaining more consistent eye contact.
+              <p className="font-inter text-light-text-primary dark:text-dark-text-primary leading-relaxed mb-4">
+                {analysisData.summary}
               </p>
+              
+              <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">Key Recommendations:</h4>
+              <ul className="list-disc list-inside space-y-1">
+                {analysisData.recommendations.map((rec, index) => (
+                  <li key={index} className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
+                    {rec}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         );
@@ -71,8 +212,8 @@ const Feedback = () => {
       case 'answers':
         return (
           <div className="space-y-6">
-            {mockQuestions.map((question, index) => (
-              <div key={question.id} className="bg-light-secondary dark:bg-dark-secondary rounded-xl p-6 border border-light-border dark:border-dark-border">
+            {analysisData.answerAnalysis.map((question, index) => (
+              <div key={index} className="bg-light-secondary dark:bg-dark-secondary rounded-xl p-6 border border-light-border dark:border-dark-border">
                 <div className="flex items-start justify-between mb-4">
                   <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary">
                     Question {index + 1}
@@ -116,7 +257,7 @@ const Feedback = () => {
                   <div>
                     <h4 className="font-medium text-orange-600 dark:text-orange-400 mb-2">Areas for Improvement:</h4>
                     <ul className="list-disc list-inside space-y-1">
-                      {question.improvements.map((improvement, i) => (
+                      {question.areasForImprovement.map((improvement, i) => (
                         <li key={i} className="font-inter text-light-text-secondary dark:text-dark-text-secondary text-sm">
                           {improvement}
                         </li>
@@ -133,36 +274,16 @@ const Feedback = () => {
         return (
           <div className="grid md:grid-cols-3 gap-6">
             {[
-              { label: 'Pace', value: metrics.pace, description: 'Speaking speed and rhythm' },
-              { label: 'Filler Words', value: metrics.fillerWords, description: 'Um, uh, like frequency' },
-              { label: 'Clarity', value: metrics.clarity, description: 'Articulation and pronunciation' },
+              { label: 'Pace', value: analysisData.pace, description: 'Speaking speed and rhythm' },
+              { label: 'Filler Words', value: analysisData.fillerWords, description: 'Um, uh, like frequency' },
+              { label: 'Clarity', value: analysisData.clarity, description: 'Articulation and pronunciation' },
             ].map((metric) => (
               <div key={metric.label} className="bg-light-secondary dark:bg-dark-secondary rounded-xl p-6 border border-light-border dark:border-dark-border text-center">
                 <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
                   {metric.label}
                 </h3>
-                <div className="relative w-24 h-24 mx-auto mb-4">
-                  <svg className="w-24 h-24 transform -rotate-90" viewBox="0 0 36 36">
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none"
-                      stroke="#e5e7eb"
-                      strokeWidth="2"
-                    />
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeDasharray={`${metric.value}, 100`}
-                      className="text-light-accent dark:text-dark-accent"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl font-bold text-light-text-primary dark:text-dark-text-primary">
-                      {metric.value}%
-                    </span>
-                  </div>
+                <div className="flex justify-center mb-4">
+                  {renderCircularProgress(metric.value, 'small')}
                 </div>
                 <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary text-sm">
                   {metric.description}
@@ -176,35 +297,15 @@ const Feedback = () => {
         return (
           <div className="grid md:grid-cols-2 gap-6">
             {[
-              { label: 'Eye Contact', value: metrics.eyeContact, description: 'Maintaining appropriate eye contact' },
-              { label: 'Posture', value: metrics.posture, description: 'Professional body positioning' },
+              { label: 'Eye Contact', value: analysisData.eyeContact, description: 'Maintaining appropriate eye contact' },
+              { label: 'Posture', value: analysisData.posture, description: 'Professional body positioning' },
             ].map((metric) => (
               <div key={metric.label} className="bg-light-secondary dark:bg-dark-secondary rounded-xl p-6 border border-light-border dark:border-dark-border text-center">
                 <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
                   {metric.label}
                 </h3>
-                <div className="relative w-32 h-32 mx-auto mb-4">
-                  <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 36 36">
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none"
-                      stroke="#e5e7eb"
-                      strokeWidth="2"
-                    />
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeDasharray={`${metric.value}, 100`}
-                      className="text-light-accent dark:text-dark-accent"
-                    />
-                  </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-3xl font-bold text-light-text-primary dark:text-dark-text-primary">
-                      {metric.value}%
-                    </span>
-                  </div>
+                <div className="flex justify-center mb-4">
+                  {renderCircularProgress(metric.value)}
                 </div>
                 <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
                   {metric.description}
@@ -252,34 +353,7 @@ const Feedback = () => {
               </p>
             </div>
             <div className="text-center">
-              <div className="relative w-32 h-32">
-                <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 36 36">
-                  <path
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    fill="none"
-                    stroke="#e5e7eb"
-                    strokeWidth="3"
-                  />
-                  <path
-                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    strokeDasharray={`${overallScore}, 100`}
-                    className="text-light-accent dark:text-dark-accent"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center">
-                    <span className="text-3xl font-bold text-light-text-primary dark:text-dark-text-primary">
-                      {overallScore}
-                    </span>
-                    <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                      / 100
-                    </p>
-                  </div>
-                </div>
-              </div>
+              {analysisData && renderCircularProgress(analysisData.overallScore)}
             </div>
           </div>
         </div>

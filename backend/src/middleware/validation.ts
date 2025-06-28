@@ -10,6 +10,7 @@ interface InterviewStartRequest {
 
 interface ConversationRequest {
   jobTitle: string;
+  userName: string;
   customInstructions?: string;
   customCriteria?: string;
 }
@@ -19,7 +20,7 @@ export const validateConversationRequest = (
   res: Response,
   next: NextFunction
 ): void => {
-  const { jobTitle, customInstructions, customCriteria } = req.body;
+  const { jobTitle, userName, customInstructions, customCriteria } = req.body;
 
   // Validate required fields
   if (!jobTitle || typeof jobTitle !== 'string' || jobTitle.trim().length === 0) {
@@ -30,11 +31,28 @@ export const validateConversationRequest = (
     return;
   }
 
+  if (!userName || typeof userName !== 'string' || userName.trim().length === 0) {
+    res.status(400).json({
+      success: false,
+      error: 'User name is required and must be a non-empty string',
+    });
+    return;
+  }
+
   // Validate job title length
   if (jobTitle.length > 100) {
     res.status(400).json({
       success: false,
       error: 'Job title must be 100 characters or less',
+    });
+    return;
+  }
+
+  // Validate user name length
+  if (userName.length > 50) {
+    res.status(400).json({
+      success: false,
+      error: 'User name must be 50 characters or less',
     });
     return;
   }

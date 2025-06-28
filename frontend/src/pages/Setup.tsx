@@ -6,6 +6,7 @@ import Layout from '../components/Layout';
 const Setup = () => {
   const navigate = useNavigate();
   const [jobTitle, setJobTitle] = useState('');
+  const [userName, setUserName] = useState('');
   const [company, setCompany] = useState('');
   const [customInstructions, setCustomInstructions] = useState('');
   const [customCriteria, setCustomCriteria] = useState('');
@@ -24,13 +25,19 @@ const Setup = () => {
     setError(null);
 
     try {
-      console.log('Creating conversation with:', { jobTitle, customInstructions, customCriteria });
+      console.log('Creating conversation with:', { 
+        jobTitle, 
+        userName, 
+        customInstructions, 
+        customCriteria 
+      });
       
       const response = await fetch('http://localhost:3001/api/interview/create-conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           jobTitle: jobTitle.trim(), 
+          userName: userName.trim(),
           customInstructions: customInstructions.trim() || undefined, 
           customCriteria: customCriteria.trim() || undefined
         }),
@@ -42,16 +49,20 @@ const Setup = () => {
       }
       
       const data = await response.json();
-      const conversationUrl = data.conversation_url;
+      const { conversation_url, conversation_id } = data;
       
-      if (!conversationUrl) {
-        throw new Error('No conversation URL received from server.');
+      if (!conversation_url || !conversation_id) {
+        throw new Error('No conversation URL or ID received from server.');
       }
       
-      console.log('Conversation created successfully:', conversationUrl);
+      console.log('Conversation created successfully:', { conversation_url, conversation_id });
       
-      // Store the conversation URL for the interview page
-      localStorage.setItem('conversationUrl', conversationUrl);
+      // Store both conversation URL and ID for the interview page
+      localStorage.setItem('conversationUrl', conversation_url);
+      localStorage.setItem('conversationId', conversation_id);
+      localStorage.setItem('userName', userName.trim());
+      localStorage.setItem('jobTitle', jobTitle.trim());
+      
       navigate('/interview');
 
     } catch (err) {
@@ -91,6 +102,20 @@ const Setup = () => {
             </div>
             <div className="grid md:grid-cols-2 gap-6">
               <div>
+                <label htmlFor="userName" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                  Your Name *
+                </label>
+                <input 
+                  type="text" 
+                  id="userName" 
+                  value={userName} 
+                  onChange={(e) => setUserName(e.target.value)} 
+                  className="w-full px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent" 
+                  placeholder="e.g., John Doe" 
+                  required 
+                />
+              </div>
+              <div>
                 <label htmlFor="jobTitle" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
                   Target Job Title *
                 </label>
@@ -104,7 +129,7 @@ const Setup = () => {
                   required 
                 />
               </div>
-              <div>
+              <div className="md:col-span-2">
                 <label htmlFor="company" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
                   Target Company (Optional)
                 </label>
@@ -127,7 +152,7 @@ const Setup = () => {
                 <User className="h-4 w-4 text-white" />
               </div>
               <h2 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary">
-                Step 2: Customize Your Interviewer
+                Step 2: Customize Your AI Interviewer
               </h2>
             </div>
             
@@ -145,7 +170,7 @@ const Setup = () => {
                   placeholder="Optional: Define your AI's personality, the questions it should ask, and its overall goal. Leave blank to auto-generate based on your job title using AI..."
                 />
                 <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
-                  If left empty, our AI will automatically generate personalized instructions based on your job title.
+                  If left empty, our AI will automatically generate personalized instructions based on your job title and name.
                 </p>
               </div>
 
@@ -162,7 +187,7 @@ const Setup = () => {
                   placeholder="Optional: List specific things you want to be judged on (e.g., technical depth, leadership examples, problem-solving approach)..."
                 />
                 <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
-                  These will be combined with our standard evaluation criteria (STAR method, clarity, confidence).
+                  These will be combined with our standard evaluation criteria (STAR method, clarity, confidence, non-verbal communication).
                 </p>
               </div>
             </div>
@@ -213,7 +238,7 @@ const Setup = () => {
           <div className="flex justify-end">
             <button 
               type="submit" 
-              disabled={isLoading || !jobTitle.trim()} 
+              disabled={isLoading || !jobTitle.trim() || !userName.trim()} 
               className="inline-flex items-center justify-center px-8 py-4 bg-light-accent dark:bg-dark-accent text-white font-semibold rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
