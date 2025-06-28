@@ -9,11 +9,9 @@ import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import interviewRoutes from './routes/interview';
 
-// Load environment variables
-
 const app = express();
 const PORT = process.env.PORT || 3001;
-// console.log(`TAVUS_API_KEY: ${process.env.TAVUS_API_ KEY}`); // Debugging line to check if the API key is loaded
+
 // Security middleware
 app.use(helmet());
 
@@ -23,6 +21,7 @@ app.use(cors({
     'http://localhost:5173', // Vite dev server
     'http://localhost:3000', // Alternative React dev server
     'http://127.0.0.1:5173', // Alternative localhost format
+    /^https:\/\/.*\.local-credentialless\.webcontainer-api\.io$/, // WebContainer URLs
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -58,14 +57,35 @@ app.use(notFound);
 // Error handling middleware
 app.use(errorHandler);
 
+// Graceful shutdown handling
+process.on('SIGTERM', () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('🛑 SIGINT received, shutting down gracefully');
+  process.exit(0);
+});
+
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`🚀 Ascend AI Backend Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`🌐 CORS enabled for: http://localhost:5173`);
+    console.log(`🌐 CORS enabled for WebContainer URLs`);
+  }
+});
+
+// Handle server errors
+server.on('error', (error: any) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${PORT} is already in use. Trying to kill existing process...`);
+    process.exit(1);
+  } else {
+    console.error('❌ Server error:', error);
   }
 });
 
