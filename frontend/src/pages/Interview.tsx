@@ -1,13 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Square, Mic, MicOff, Video, VideoOff, Download, AlertCircle } from 'lucide-react';
-// @ts-ignore
-import muxjs from 'mux.js';
+import { Square, Download, AlertCircle } from 'lucide-react';
 
 const Interview = () => {
   const navigate = useNavigate();
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOn, setIsVideoOn] = useState(true);
   const [conversationUrl, setConversationUrl] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -44,8 +40,12 @@ const Interview = () => {
     const initializeMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: true, 
-          audio: true 
+          video: { width: 1280, height: 720 }, 
+          audio: { 
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 44100
+          } 
         });
         
         streamRef.current = stream;
@@ -54,9 +54,22 @@ const Interview = () => {
           userVideoRef.current.srcObject = stream;
         }
 
-        // Initialize MediaRecorder for WebM format
+        // Check if MediaRecorder supports the desired format
+        let mimeType = 'video/webm;codecs=vp9,opus';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'video/webm;codecs=vp8,opus';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm';
+          }
+        }
+
+        console.log('Using MIME type:', mimeType);
+
+        // Initialize MediaRecorder
         const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'video/webm;codecs=vp9,opus'
+          mimeType: mimeType,
+          videoBitsPerSecond: 2500000, // 2.5 Mbps
+          audioBitsPerSecond: 128000   // 128 kbps
         });
         
         mediaRecorderRef.current = mediaRecorder;
@@ -64,16 +77,23 @@ const Interview = () => {
 
         // Handle data available event
         mediaRecorder.ondataavailable = (event) => {
+          console.log('Data available:', event.data.size, 'bytes');
           if (event.data.size > 0) {
             recordedChunksRef.current.push(event.data);
           }
         };
 
-        // Start recording
-        mediaRecorder.start(1000); // Record in 1-second chunks
+        // Handle recording stop
+        mediaRecorder.onstop = () => {
+          console.log('Recording stopped. Total chunks:', recordedChunksRef.current.length);
+          console.log('Total size:', recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0), 'bytes');
+        };
+
+        // Start recording with smaller time slices for better data capture
+        mediaRecorder.start(100); // Record in 100ms chunks for better reliability
         setIsRecording(true);
         sessionStartTimeRef.current = Date.now();
-        console.log('Recording started');
+        console.log('Recording started with format:', mimeType);
 
       } catch (err) {
         console.error("Failed to get user media:", err);
@@ -91,90 +111,54 @@ const Interview = () => {
     // Cleanup function
     return () => {
       clearInterval(timer);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
     };
   }, [navigate]);
 
-  // Enhanced function to convert WebM to MP4 and trigger download
-  const triggerDownload = () => {
+  // Enhanced function to create and download recording
+  const triggerDownload = async () => {
     if (recordedChunksRef.current.length === 0) {
       console.log('No recorded data to download');
       return;
     }
 
     try {
+      console.log('Creating download with', recordedChunksRef.current.length, 'chunks');
+      
       // Stop recording if still active
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
+        // Wait a bit for the final data to be available
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      // Create WebM blob
-      const webmBlob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+      // Create blob from recorded chunks
+      const blob = new Blob(recordedChunksRef.current, { 
+        type: 'video/webm' 
+      });
       
-      // Convert WebM to MP4 using mux.js
-      const reader = new FileReader();
-      reader.onload = function() {
-        try {
-          const arrayBuffer = reader.result as ArrayBuffer;
-          const uint8Array = new Uint8Array(arrayBuffer);
-          
-          // Use mux.js to remux WebM to MP4
-          const transmuxer = new muxjs.mp4.Transmuxer();
-          const mp4Segments: Uint8Array[] = [];
-          
-          transmuxer.on('data', (segment: any) => {
-            mp4Segments.push(new Uint8Array(segment.initSegment));
-            mp4Segments.push(new Uint8Array(segment.data));
-          });
-          
-          transmuxer.on('done', () => {
-            // Combine all segments into a single MP4 blob
-            const mp4Blob = new Blob(mp4Segments, { type: 'video/mp4' });
-            
-            // Create download link for MP4
-            const url = URL.createObjectURL(mp4Blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.mp4`;
-            
-            document.body.appendChild(a);
-            a.click();
-            
-            // Cleanup
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            console.log('MP4 download triggered successfully');
-          });
-          
-          // Push WebM data to transmuxer
-          transmuxer.push(uint8Array);
-          transmuxer.flush();
-          
-        } catch (conversionError) {
-          console.error('Error converting to MP4, falling back to WebM:', conversionError);
-          
-          // Fallback: download as WebM if conversion fails
-          const url = URL.createObjectURL(webmBlob);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = url;
-          a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
-          
-          document.body.appendChild(a);
-          a.click();
-          
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-          
-          console.log('WebM download triggered as fallback');
-        }
-      };
+      console.log('Created blob with size:', blob.size, 'bytes');
       
-      reader.readAsArrayBuffer(webmBlob);
+      if (blob.size === 0) {
+        console.error('Blob is empty, cannot download');
+        setError('Recording is empty. Please try recording again.');
+        return;
+      }
+
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+      
+      document.body.appendChild(a);
+      a.click();
+      
+      // Cleanup
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log('Download triggered successfully');
       
     } catch (error) {
       console.error('Error triggering download:', error);
@@ -185,23 +169,32 @@ const Interview = () => {
   // Enhanced session cleanup with proper order
   const handleEndSession = async () => {
     console.log('🛑 Ending interview session...');
-    setIsRecording(false);
     
     try {
-      // Step 1: Stop recording
+      // Step 1: Stop recording first
+      setIsRecording(false);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
+        console.log('Recording stopped');
+        // Wait for final data
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
       // Step 2: Trigger download
-      triggerDownload();
+      await triggerDownload();
       
-      // Step 3: Stop all media tracks (turn off camera light)
+      // Step 3: Stop all media tracks IMMEDIATELY (turn off camera light)
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
           track.stop();
           console.log(`Stopped ${track.kind} track`);
         });
+        streamRef.current = null;
+        
+        // Clear video element
+        if (userVideoRef.current) {
+          userVideoRef.current.srcObject = null;
+        }
       }
       
       // Step 4: End conversation on backend to stop credit usage
@@ -242,6 +235,11 @@ const Interview = () => {
   // Handle unexpected tab close with beacon
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // Stop all tracks immediately
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
       // Use sendBeacon for reliable cleanup on tab close
       if (conversationId) {
         navigator.sendBeacon(
@@ -249,9 +247,6 @@ const Interview = () => {
           JSON.stringify({ conversationId })
         );
       }
-      
-      // Trigger download before leaving
-      triggerDownload();
       
       event.preventDefault();
       event.returnValue = '';
@@ -261,30 +256,12 @@ const Interview = () => {
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Also cleanup on component unmount
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
     };
   }, [conversationId]);
-
-  const toggleMute = () => {
-    if (streamRef.current) {
-      const audioTracks = streamRef.current.getAudioTracks();
-      audioTracks.forEach(track => {
-        track.enabled = isMuted;
-      });
-      setIsMuted(!isMuted);
-      console.log(`Audio ${isMuted ? 'enabled' : 'disabled'}`);
-    }
-  };
-
-  const toggleVideo = () => {
-    if (streamRef.current) {
-      const videoTracks = streamRef.current.getVideoTracks();
-      videoTracks.forEach(track => {
-        track.enabled = !isVideoOn;
-      });
-      setIsVideoOn(!isVideoOn);
-      console.log(`Video ${isVideoOn ? 'disabled' : 'enabled'}`);
-    }
-  };
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -393,49 +370,15 @@ const Interview = () => {
                   className="w-full h-full object-cover" 
                 />
                 
-                {!isVideoOn && (
-                  <div className="absolute inset-0 bg-black flex items-center justify-center">
-                    <div className="text-center">
-                      <VideoOff className="h-8 w-8 text-white/50 mx-auto mb-2" />
-                      <p className="text-white/70 text-sm">Camera is off</p>
+                {/* Recording indicator */}
+                {isRecording && (
+                  <div className="absolute top-2 right-2">
+                    <div className="flex items-center space-x-2 bg-red-500 text-white px-2 py-1 rounded-full text-xs">
+                      <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                      <span>REC</span>
                     </div>
                   </div>
                 )}
-                
-                {/* Video Controls */}
-                <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2">
-                  <div className="flex items-center space-x-2 bg-black/50 backdrop-blur-sm rounded-full px-3 py-2">
-                    <button
-                      onClick={toggleMute}
-                      className={`p-2 rounded-full transition-colors ${
-                        isMuted 
-                          ? 'bg-red-500 hover:bg-red-600' 
-                          : 'bg-white/20 hover:bg-white/30'
-                      }`}
-                    >
-                      {isMuted ? (
-                        <MicOff className="h-3 w-3 text-white" />
-                      ) : (
-                        <Mic className="h-3 w-3 text-white" />
-                      )}
-                    </button>
-                    
-                    <button
-                      onClick={toggleVideo}
-                      className={`p-2 rounded-full transition-colors ${
-                        !isVideoOn 
-                          ? 'bg-red-500 hover:bg-red-600' 
-                          : 'bg-white/20 hover:bg-white/30'
-                      }`}
-                    >
-                      {!isVideoOn ? (
-                        <VideoOff className="h-3 w-3 text-white" />
-                      ) : (
-                        <Video className="h-3 w-3 text-white" />
-                      )}
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -474,15 +417,15 @@ const Interview = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera:</span>
-                  <span className={`font-medium ${isVideoOn ? 'text-green-500' : 'text-red-500'}`}>
-                    {isVideoOn ? 'On' : 'Off'}
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
+                  <span className={`font-medium ${isRecording ? 'text-red-500' : 'text-gray-500'}`}>
+                    {isRecording ? 'Active' : 'Stopped'}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Microphone:</span>
-                  <span className={`font-medium ${!isMuted ? 'text-green-500' : 'text-red-500'}`}>
-                    {!isMuted ? 'On' : 'Muted'}
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Chunks:</span>
+                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
+                    {recordedChunksRef.current.length}
                   </span>
                 </div>
               </div>

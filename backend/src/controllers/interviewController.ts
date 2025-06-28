@@ -6,12 +6,19 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 
 // Enhanced helper function to generate persona instructions using Gemini
-const generatePersonaInstructions = async (jobTitle: string, userName: string): Promise<string> => {
+const generatePersonaInstructions = async (jobTitle: string, userName: string, customInstructions?: string, customCriteria?: string): Promise<string> => {
   try {
     const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-1.5-flash' });
     
+    // If custom instructions are provided, use them as base
+    if (customInstructions && customInstructions.trim()) {
+      console.log("Using provided custom instructions");
+      return customInstructions.trim();
+    }
+    
     const prompt = `You are an expert career coach AI named 'Sarah'. Your task is to conduct a mock interview and provide real-time, structured feedback.
 
+CRITICAL INSTRUCTIONS:
 - Your first line MUST be a friendly and professional greeting to the user by their name, '${userName}'.
 - Your second instruction is to politely ask them to ensure their camera and microphone are on and that their face is centered in the frame for the best experience.
 - The user is practicing for a '${jobTitle}' role. Ask 5-7 relevant behavioral and technical questions one by one.
@@ -21,7 +28,9 @@ const generatePersonaInstructions = async (jobTitle: string, userName: string): 
 - Keep your feedback constructive and encouraging while being honest about areas for improvement.
 - End the interview after 5-7 questions with a summary and encouragement.
 
-Make the interviewer persona professional, encouraging, and thorough in their evaluation with real-time visual feedback capabilities.`;
+Make the interviewer persona professional, encouraging, and thorough in their evaluation with real-time visual feedback capabilities.
+
+Generate a complete interview script that follows these guidelines for the ${jobTitle} position.`;
     
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -33,7 +42,7 @@ Make the interviewer persona professional, encouraging, and thorough in their ev
   }
 };
 
-// Enhanced controller function for creating conversations with hybrid approach
+// Enhanced controller function for creating conversations with custom instructions
 export const createConversation = async (
   req: Request,
   res: Response,
@@ -72,36 +81,45 @@ export const createConversation = async (
 
     console.log("✅ Creating conversation with enhanced persona for:", { jobTitle, userName });
 
-    // Step 1: Generate or use provided instructions with userName
-    let instructions: string;
-    if (customInstructions && customInstructions.trim()) {
-      instructions = customInstructions.trim();
-      console.log("Using custom instructions provided by user");
-    } else {
-      console.log("Generating enhanced instructions using Gemini API...");
-      instructions = await generatePersonaInstructions(jobTitle, userName);
-      console.log("Generated instructions:", instructions.substring(0, 100) + "...");
-    }
+    // Step 1: Generate enhanced instructions using Gemini (even though we use static persona)
+    // This allows us to log what the ideal instructions would be and potentially use them later
+    console.log("Generating enhanced instructions using Gemini API...");
+    const generatedInstructions = await generatePersonaInstructions(
+      jobTitle, 
+      userName, 
+      customInstructions, 
+      customCriteria
+    );
+    console.log("Generated instructions:", generatedInstructions.substring(0, 100) + "...");
 
-    // Step 2: Combine with judgment criteria
-    const baselineCriteria = "Critically evaluate the candidate's response on the following: 1. Clarity and conciseness of their answer. 2. Use of the STAR (Situation, Task, Action, Result) method for behavioral questions. 3. Confidence and tone of voice. 4. Relevance to the role and industry. 5. Non-verbal communication including eye contact and posture.";
-    
-    let finalCriteria = baselineCriteria;
+    // Step 2: Combine with judgment criteria if provided
+    let finalInstructions = generatedInstructions;
     if (customCriteria && customCriteria.trim()) {
-      finalCriteria = `${customCriteria.trim()} Additionally, ${baselineCriteria}`;
+      const baselineCriteria = "Additionally, evaluate based on: 1. Clarity and conciseness. 2. Use of the STAR method for behavioral questions. 3. Confidence and tone. 4. Relevance to the role. 5. Non-verbal communication including eye contact and posture.";
+      finalInstructions = `${generatedInstructions}\n\nCustom Judgment Criteria: ${customCriteria.trim()}\n\n${baselineCriteria}`;
     }
 
-    // Step 3: Create final persona instructions
-    const persona_instructions = `${instructions}\n\nJudgment Criteria:\n${finalCriteria}\n\nRemember to be encouraging while providing honest, constructive feedback after each response. Use your vision capabilities to analyze non-verbal communication.`;
+    // Step 3: Log the final instructions for debugging/future use
+    console.log("Final enhanced instructions length:", finalInstructions.length);
+    console.log("Using static PERSONA_ID:", TAVUS_PERSONA_ID);
 
-    console.log("Final persona instructions length:", persona_instructions.length);
-
-    // Step 4: Store the custom instructions for this session (we'll use static persona but store custom instructions for later use)
-    // For now, we'll use the static persona but log the custom instructions
-    console.log("Custom instructions generated/provided:", persona_instructions.substring(0, 200) + "...");
+    // Step 4: Store session data for later analysis
+    const sessionData = {
+      jobTitle: jobTitle.trim(),
+      userName: userName.trim(),
+      customInstructions: customInstructions?.trim() || null,
+      customCriteria: customCriteria?.trim() || null,
+      generatedInstructions: finalInstructions,
+      timestamp: new Date().toISOString()
+    };
+    
+    // In a real app, you'd save this to a database
+    console.log("Session data prepared:", {
+      ...sessionData,
+      generatedInstructions: sessionData.generatedInstructions.substring(0, 100) + "..."
+    });
 
     // Step 5: Call Tavus API to create conversation using static persona_id
-    // Note: The custom instructions are generated but we use the static persona for Tavus API compatibility
     const conversationResponse = await axios.post(
       'https://tavusapi.com/v2/conversations',
       {
@@ -135,7 +153,12 @@ export const createConversation = async (
       conversation_url,
       conversation_id,
       message: 'Interview conversation created successfully',
-      customInstructionsGenerated: !!instructions // Let frontend know if custom instructions were generated
+      sessionData: {
+        jobTitle: sessionData.jobTitle,
+        userName: sessionData.userName,
+        hasCustomInstructions: !!customInstructions,
+        hasCustomCriteria: !!customCriteria
+      }
     });
 
   } catch (error) {
@@ -225,7 +248,7 @@ export const endConversation = async (
   }
 };
 
-// Function to analyze interview and generate feedback
+// Function to analyze interview and generate feedback using Gemini
 export const analyzeInterview = async (
   req: Request,
   res: Response,
@@ -272,7 +295,7 @@ Please return a JSON object with the following structure:
   "recommendations": ["string"]
 }
 
-Provide realistic scores based on the content. Be constructive and specific in feedback.`;
+Provide realistic scores based on the content. Be constructive and specific in feedback. Focus on communication skills, answer structure, and professional presentation.`;
 
     const result = await model.generateContent(analysisPrompt);
     const response = await result.response;
@@ -280,7 +303,8 @@ Provide realistic scores based on the content. Be constructive and specific in f
     
     try {
       // Try to parse the JSON response
-      const analysisData = JSON.parse(analysisText);
+      const cleanedText = analysisText.replace(/```json\n?|\n?```/g, '').trim();
+      const analysisData = JSON.parse(cleanedText);
       
       console.log('✅ Interview analysis completed for session:', sessionId);
       
@@ -293,8 +317,9 @@ Provide realistic scores based on the content. Be constructive and specific in f
       
     } catch (parseError) {
       console.error('Error parsing analysis JSON:', parseError);
+      console.log('Raw response:', analysisText);
       
-      // Fallback with mock data if JSON parsing fails
+      // Fallback with enhanced mock data
       const fallbackAnalysis = {
         overallScore: 82,
         pace: 85,
@@ -305,22 +330,37 @@ Provide realistic scores based on the content. Be constructive and specific in f
         answerAnalysis: [
           {
             question: "Tell me about a time you faced a difficult challenge at work.",
-            answer: "I was leading a project with a tight deadline when our main developer left unexpectedly...",
-            feedback: "Good use of STAR method. Clear situation and task description.",
+            answer: "I was leading a project with a tight deadline when our main developer left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional coding responsibilities. Through clear communication and extra hours, we delivered the project on time and maintained quality standards.",
+            feedback: "Excellent use of STAR method. Clear situation description and strong result orientation. Shows leadership and adaptability under pressure.",
+            score: 88,
+            strengths: ["Clear structure using STAR method", "Demonstrated leadership", "Quantified results", "Showed adaptability"],
+            areasForImprovement: ["Could elaborate on specific communication strategies used", "Mention lessons learned for future situations"]
+          },
+          {
+            question: "Describe a situation where you had to work with a difficult team member.",
+            answer: "In my previous role, I worked with a colleague who was resistant to feedback and often missed deadlines. I approached them privately to understand their concerns and discovered they were overwhelmed with their workload. I helped them prioritize tasks and offered support, which improved our working relationship and team productivity.",
+            feedback: "Great demonstration of emotional intelligence and conflict resolution skills. Shows empathy and problem-solving approach.",
             score: 85,
-            strengths: ["Clear structure", "Specific examples", "Quantified results"],
-            areasForImprovement: ["Could be more concise", "Add more emotional intelligence elements"]
+            strengths: ["Showed empathy and understanding", "Proactive problem-solving", "Focus on positive outcomes", "Professional approach"],
+            areasForImprovement: ["Could mention specific techniques used for prioritization", "Describe how you measured the improvement in productivity"]
           }
         ],
-        summary: "Strong performance with good technical knowledge and communication skills. Focus on reducing filler words and maintaining consistent eye contact.",
-        recommendations: ["Practice the STAR method more", "Work on reducing 'um' and 'uh'", "Maintain better eye contact"]
+        summary: "Strong performance with excellent communication skills and professional demeanor. Demonstrated good use of the STAR method and showed emotional intelligence in handling workplace challenges. Areas for improvement include reducing filler words and maintaining more consistent eye contact throughout responses.",
+        recommendations: [
+          "Practice the STAR method with more technical examples",
+          "Work on reducing 'um' and 'uh' filler words",
+          "Maintain better eye contact during longer responses",
+          "Prepare specific metrics to quantify achievements",
+          "Practice explaining complex technical concepts simply"
+        ]
       };
       
       res.status(200).json({
         success: true,
         sessionId,
         analysis: fallbackAnalysis,
-        message: 'Interview analysis completed with fallback data'
+        message: 'Interview analysis completed with enhanced fallback data',
+        note: 'AI analysis temporarily unavailable, using enhanced sample analysis'
       });
     }
 

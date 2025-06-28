@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Target, MessageSquare, BarChart3, Loader2, User, AlertCircle } from 'lucide-react';
+import { ArrowRight, Target, User, BarChart3, Loader2, AlertCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const Setup = () => {
@@ -29,7 +29,8 @@ const Setup = () => {
         jobTitle, 
         userName, 
         customInstructions, 
-        customCriteria 
+        customCriteria,
+        feedbackMetrics
       });
       
       const response = await fetch('http://localhost:3001/api/interview/create-conversation', {
@@ -39,7 +40,8 @@ const Setup = () => {
           jobTitle: jobTitle.trim(), 
           userName: userName.trim(),
           customInstructions: customInstructions.trim() || undefined, 
-          customCriteria: customCriteria.trim() || undefined
+          customCriteria: customCriteria.trim() || undefined,
+          feedbackMetrics
         }),
       });
 
@@ -49,19 +51,29 @@ const Setup = () => {
       }
       
       const data = await response.json();
-      const { conversation_url, conversation_id } = data;
+      const { conversation_url, conversation_id, sessionData } = data;
       
       if (!conversation_url || !conversation_id) {
         throw new Error('No conversation URL or ID received from server.');
       }
       
-      console.log('Conversation created successfully:', { conversation_url, conversation_id });
+      console.log('Conversation created successfully:', { conversation_url, conversation_id, sessionData });
       
-      // Store both conversation URL and ID for the interview page
+      // Store conversation data and session info for the interview page
       localStorage.setItem('conversationUrl', conversation_url);
       localStorage.setItem('conversationId', conversation_id);
       localStorage.setItem('userName', userName.trim());
       localStorage.setItem('jobTitle', jobTitle.trim());
+      localStorage.setItem('company', company.trim());
+      localStorage.setItem('feedbackMetrics', JSON.stringify(feedbackMetrics));
+      
+      // Store custom instructions and criteria for later use in feedback
+      if (customInstructions.trim()) {
+        localStorage.setItem('customInstructions', customInstructions.trim());
+      }
+      if (customCriteria.trim()) {
+        localStorage.setItem('customCriteria', customCriteria.trim());
+      }
       
       navigate('/interview');
 
@@ -143,9 +155,22 @@ const Setup = () => {
                 />
               </div>
             </div>
+
+            {/* AI Interviewer Info */}
+            <div className="mt-6 p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
+              <div className="flex items-center space-x-3 mb-2">
+                <User className="h-5 w-5 text-light-accent dark:text-dark-accent" />
+                <h3 className="font-medium text-light-text-primary dark:text-dark-text-primary">AI Interviewer: Sarah</h3>
+              </div>
+              <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
+                Your AI interviewer is pre-configured with advanced vision capabilities and will provide real-time feedback on your 
+                answers, body language, and communication skills. She will greet you by name and guide you through a professional 
+                interview experience.
+              </p>
+            </div>
           </div>
 
-          {/* Step 2: Customize Your Interviewer */}
+          {/* Step 2: Customize Your AI Interviewer */}
           <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
             <div className="flex items-center space-x-3 mb-6">
               <div className="w-8 h-8 bg-light-accent dark:bg-dark-accent rounded-full flex items-center justify-center">
@@ -221,6 +246,9 @@ const Setup = () => {
                 </label>
               ))}
             </div>
+            <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-4">
+              Select the areas you want to receive detailed feedback on during your interview analysis.
+            </p>
           </div>
 
           {/* Error Message Display */}
