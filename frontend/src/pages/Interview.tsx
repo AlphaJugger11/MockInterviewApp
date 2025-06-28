@@ -13,6 +13,11 @@ const Interview = () => {
   const [userName, setUserName] = useState<string>('');
   const [isEnding, setIsEnding] = useState(false);
 
+  // Browser recording states
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -52,6 +57,92 @@ const Interview = () => {
     };
   }, [navigate, isEnding]);
 
+  // Browser-based recording as fallback (since no S3 bucket)
+  useEffect(() => {
+    const startBrowserRecording = async () => {
+      try {
+        console.log('🎬 Starting browser-based screen recording...');
+        
+        // Request screen capture with audio
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { 
+            mediaSource: 'screen',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            sampleRate: 44100
+          }
+        });
+        
+        // Create MediaRecorder with WebM format
+        const recorder = new MediaRecorder(stream, {
+          mimeType: 'video/webm;codecs=vp9,opus'
+        });
+        
+        const chunks: Blob[] = [];
+        
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+            console.log('📊 Recording chunk received:', event.data.size, 'bytes');
+          }
+        };
+        
+        recorder.onstop = () => {
+          console.log('🛑 Browser recording stopped, processing...');
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          
+          console.log('✅ Recording blob created:', blob.size, 'bytes');
+          
+          // Store recording
+          localStorage.setItem(`recording_${conversationId}`, url);
+          localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
+            format: 'webm',
+            source: 'browser_screen_capture',
+            url: url,
+            timestamp: new Date().toISOString(),
+            size: blob.size,
+            duration: sessionDuration
+          }));
+          
+          setRecordingUrl(url);
+          setRecordedChunks(chunks);
+          console.log('💾 Browser recording saved to localStorage');
+        };
+        
+        recorder.onerror = (event) => {
+          console.error('❌ Recording error:', event);
+        };
+        
+        // Start recording with data collection every second
+        recorder.start(1000);
+        setMediaRecorder(recorder);
+        
+        console.log('✅ Browser recording started successfully');
+        
+        // Handle stream end (user stops sharing)
+        stream.getVideoTracks()[0].addEventListener('ended', () => {
+          console.log('📺 Screen sharing ended by user');
+          if (recorder.state === 'recording') {
+            recorder.stop();
+          }
+        });
+        
+      } catch (error) {
+        console.warn('⚠️ Browser recording not available:', error);
+        // Continue without browser recording - Tavus will handle recording
+      }
+    };
+    
+    if (conversationId && !mediaRecorder && isRecording) {
+      startBrowserRecording();
+    }
+  }, [conversationId, isRecording, sessionDuration]);
+
   // CRITICAL: Enhanced session cleanup with REAL transcript and recording capture
   const handleEndSession = async () => {
     if (isEnding) return; // Prevent multiple calls
@@ -60,11 +151,20 @@ const Interview = () => {
     setIsEnding(true);
     
     try {
-      // Step 1: Capture REAL conversation data from Tavus API
+      // Step 1: Stop browser recording first
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        console.log('🛑 Stopping browser recording...');
+        mediaRecorder.stop();
+        
+        // Wait a moment for the recording to process
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      
+      // Step 2: Capture REAL conversation data from Tavus API
       console.log('📊 Capturing REAL conversation data from Tavus...');
       let realTranscript: any[] = [];
       let conversationData: any = {};
-      let recordingUrl: string | null = null;
+      let tavusRecordingUrl: string | null = null;
       
       if (conversationId) {
         try {
@@ -79,7 +179,11 @@ const Interview = () => {
             console.log('✅ Retrieved REAL conversation data:', conversationData);
             
             // Extract REAL transcript from conversation data
-            if (conversationData.transcript) {
+            if (conversationData.transcriptEvents && conversationData.transcriptEvents.length > 0) {
+              realTranscript = conversationData.transcriptEvents;
+              console.log('📝 Extracted REAL transcript events:', realTranscript.length);
+            } else if (conversationData.transcript) {
+              // Convert string transcript to events
               const transcriptText = conversationData.transcript;
               realTranscript = transcriptText.split('\n').map((line: string, index: number) => {
                 const trimmedLine = line.trim();
@@ -96,13 +200,13 @@ const Interview = () => {
                 };
               }).filter(item => item !== null);
               
-              console.log('📝 Extracted REAL transcript:', realTranscript.length, 'events');
+              console.log('📝 Converted transcript to events:', realTranscript.length);
             }
             
-            // Get recording URL if available
+            // Get Tavus recording URL if available
             if (conversationData.recording_url) {
-              recordingUrl = conversationData.recording_url;
-              console.log('🎬 REAL recording URL available:', recordingUrl);
+              tavusRecordingUrl = conversationData.recording_url;
+              console.log('🎬 Tavus recording URL available:', tavusRecordingUrl);
             }
           }
         } catch (apiError) {
@@ -110,7 +214,7 @@ const Interview = () => {
         }
       }
       
-      // Step 2: Store final session data with REAL transcript and recording
+      // Step 3: Store final session data with REAL transcript and recording
       const finalSessionData = {
         conversationId,
         transcript: realTranscript,
@@ -120,33 +224,38 @@ const Interview = () => {
         jobTitle: localStorage.getItem('jobTitle'),
         company: localStorage.getItem('company'),
         conversationData: conversationData,
-        recordingUrl: recordingUrl
+        recordingUrl: tavusRecordingUrl || recordingUrl, // Prefer Tavus, fallback to browser
+        browserRecordingUrl: recordingUrl,
+        tavusRecordingUrl: tavusRecordingUrl
       };
       
       localStorage.setItem(`session_${conversationId}`, JSON.stringify(finalSessionData));
       localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(realTranscript));
       
-      // Store recording URL if available
-      if (recordingUrl) {
-        localStorage.setItem(`recording_${conversationId}`, recordingUrl);
+      // Store recording URLs if available
+      if (tavusRecordingUrl) {
+        localStorage.setItem(`recording_${conversationId}`, tavusRecordingUrl);
         localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
           format: 'mp4',
           source: 'tavus_cloud',
-          url: recordingUrl,
+          url: tavusRecordingUrl,
           timestamp: new Date().toISOString()
         }));
+      } else if (recordingUrl) {
+        // Keep browser recording as fallback
+        console.log('📹 Using browser recording as fallback');
       }
       
       console.log('💾 Final session data stored with REAL transcript and recording');
       
-      // Step 3: Download REAL transcript immediately
+      // Step 4: Download REAL transcript immediately
       if (realTranscript.length > 0) {
         downloadRealTranscript(realTranscript);
       } else {
         console.warn('⚠️ No real transcript available for download');
       }
       
-      // Step 4: End conversation on backend to stop Tavus session
+      // Step 5: End conversation on backend to stop Tavus session
       if (conversationId) {
         try {
           console.log('🛑 Ending conversation on backend...');
@@ -175,12 +284,12 @@ const Interview = () => {
         }
       }
       
-      // Step 5: Store session completion data
+      // Step 6: Store session completion data
       localStorage.setItem('sessionCompleted', 'true');
       localStorage.setItem('sessionEndTime', new Date().toISOString());
       localStorage.setItem('sessionDuration', sessionDuration.toString());
       
-      // Step 6: Navigate to feedback page
+      // Step 7: Navigate to feedback page
       console.log('✅ Navigating to feedback page...');
       navigate('/feedback/1');
       
@@ -247,6 +356,11 @@ TRANSCRIPT:
   // Handle unexpected tab close
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      // Stop recording if active
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+      
       // Use sendBeacon for reliable cleanup on tab close
       if (conversationId && !isEnding) {
         const data = JSON.stringify({ 
@@ -265,7 +379,7 @@ TRANSCRIPT:
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [conversationId, dynamicPersonaId, isEnding]);
+  }, [conversationId, dynamicPersonaId, isEnding, mediaRecorder]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -304,11 +418,11 @@ TRANSCRIPT:
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session - Tavus Recording
+                Live Interview Session - Tavus + Browser Recording
               </span>
               {isRecording && !isEnding && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                  Recording • {formatDuration(sessionDuration)} • Cloud Recording Active
+                  Recording • {formatDuration(sessionDuration)} • Dual Recording Active
                 </span>
               )}
             </div>
@@ -346,9 +460,17 @@ TRANSCRIPT:
                 <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary mb-2">
                   Your AI interviewer Sarah is conducting a personalized interview with {userName}
                 </p>
-                <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span>Tavus Cloud Recording & Transcript Capture Active</span>
+                <div className="flex justify-center space-x-4">
+                  <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span>Tavus Cloud Recording</span>
+                  </div>
+                  {mediaRecorder && mediaRecorder.state === 'recording' && (
+                    <div className="inline-flex items-center space-x-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full text-sm">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                      <span>Browser Backup Recording</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -383,7 +505,7 @@ TRANSCRIPT:
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
               <span className="text-green-500 font-medium">
-                Tavus Cloud
+                Tavus + Browser
               </span>
             </div>
             <div className="flex justify-between">
@@ -412,6 +534,14 @@ TRANSCRIPT:
                 </span>
               </div>
             )}
+            {mediaRecorder && (
+              <div className="flex justify-between">
+                <span className="text-light-text-secondary dark:text-dark-text-secondary">Browser Rec:</span>
+                <span className={`font-medium text-xs ${mediaRecorder.state === 'recording' ? 'text-green-500' : 'text-gray-500'}`}>
+                  {mediaRecorder.state}
+                </span>
+              </div>
+            )}
           </div>
           
           {/* Additional Info */}
@@ -420,10 +550,11 @@ TRANSCRIPT:
               Recording & Transcript Information
             </h4>
             <ul className="text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
-              <li>• Video recording is handled by Tavus cloud infrastructure</li>
-              <li>• Real-time transcript is captured during the conversation</li>
-              <li>• Both recording and transcript will be available for download when you end the session</li>
-              <li>• Analysis will be based on your actual conversation content</li>
+              <li>• Primary recording handled by Tavus cloud infrastructure</li>
+              <li>• Browser screen recording as backup (WebM format)</li>
+              <li>• Real-time transcript captured during conversation</li>
+              <li>• Both recording and transcript available for download when session ends</li>
+              <li>• Analysis based on actual conversation content</li>
             </ul>
           </div>
         </div>

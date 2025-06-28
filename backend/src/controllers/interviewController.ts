@@ -5,6 +5,15 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 
+// Global storage for webhook data (in production, use a database)
+declare global {
+  var conversationTranscripts: Record<string, any>;
+  var conversationRecordings: Record<string, any>;
+}
+
+global.conversationTranscripts = global.conversationTranscripts || {};
+global.conversationRecordings = global.conversationRecordings || {};
+
 // Enhanced helper function to generate persona instructions using Gemini
 const generatePersonaInstructions = async (jobTitle: string, userName: string, customInstructions?: string, customCriteria?: string): Promise<string> => {
   try {
@@ -64,7 +73,7 @@ Generate a complete system prompt that establishes Sarah's identity, role, and r
   }
 };
 
-// Enhanced controller function for creating conversations with DYNAMIC PERSONA AND CONVERSATIONAL CONTEXT
+// Enhanced controller function for creating conversations with PROPER RECORDING
 export const createConversation = async (
   req: Request,
   res: Response,
@@ -100,7 +109,7 @@ export const createConversation = async (
       return;
     }
 
-    console.log("✅ Creating conversation with DYNAMIC persona for:", { jobTitle, userName });
+    console.log("✅ Creating conversation with RECORDING ENABLED for:", { jobTitle, userName });
 
     // Step 1: Generate enhanced instructions using Gemini
     console.log("Generating enhanced instructions using Gemini API...");
@@ -146,8 +155,8 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Create conversation with recording enabled
-    console.log("Creating conversation with enhanced conversational context and recording...");
+    // Step 4: Create conversation with RECORDING ENABLED
+    console.log("Creating conversation with RECORDING ENABLED...");
     
     try {
       const conversationResponse = await axios.post(
@@ -160,6 +169,9 @@ IMPORTANT REMINDERS:
             max_call_duration: 1200, // 20 minutes max call duration
             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
             participant_left_timeout: 15, // Set timeout after participant leaves
+            enable_recording: true, // CRITICAL: Enable recording
+            enable_transcription: true, // CRITICAL: Enable transcription
+            // Note: Without S3, recording will be temporary but still captured
           }
         },
         {
@@ -177,7 +189,7 @@ IMPORTANT REMINDERS:
         throw new Error('No conversation URL or ID received from Tavus API');
       }
       
-      console.log('✅ Conversation created successfully. URL:', conversation_url, 'ID:', conversation_id);
+      console.log('✅ Conversation created successfully with RECORDING. URL:', conversation_url, 'ID:', conversation_id);
 
       // Step 5: Store session data for later analysis
       const sessionData = {
@@ -205,14 +217,14 @@ IMPORTANT REMINDERS:
         success: true,
         conversation_url,
         conversation_id,
-        message: 'Interview conversation created successfully with Tavus recording',
+        message: 'Interview conversation created successfully with Tavus recording and transcription',
         sessionData: {
           jobTitle: sessionData.jobTitle,
           userName: sessionData.userName,
           hasCustomInstructions: !!customInstructions,
           hasCustomCriteria: !!customCriteria,
           conversationId: conversation_id,
-          method: 'conversational_context'
+          method: 'conversational_context_with_recording'
         }
       });
 
@@ -242,7 +254,7 @@ IMPORTANT REMINDERS:
         const dynamicPersonaId = personaResponse.data.persona_id;
         console.log("✅ Dynamic persona created as fallback:", dynamicPersonaId);
 
-        // Create conversation with the dynamic persona
+        // Create conversation with the dynamic persona and RECORDING
         const conversationResponse = await axios.post(
           'https://tavusapi.com/v2/conversations',
           {
@@ -253,6 +265,8 @@ IMPORTANT REMINDERS:
               max_call_duration: 1200,
               participant_absent_timeout: 300,
               participant_left_timeout: 15,
+              enable_recording: true, // CRITICAL: Enable recording
+              enable_transcription: true, // CRITICAL: Enable transcription
             }
           },
           {
@@ -270,7 +284,7 @@ IMPORTANT REMINDERS:
           throw new Error('No conversation URL or ID received from Tavus API');
         }
         
-        console.log('✅ Conversation created successfully with dynamic persona. URL:', conversation_url, 'ID:', conversation_id);
+        console.log('✅ Conversation created successfully with dynamic persona and RECORDING. URL:', conversation_url, 'ID:', conversation_id);
 
         const sessionData = {
           jobTitle: jobTitle.trim(),
@@ -287,7 +301,7 @@ IMPORTANT REMINDERS:
           success: true,
           conversation_url,
           conversation_id,
-          message: 'Interview conversation created successfully with dynamic persona and Tavus recording (fallback)',
+          message: 'Interview conversation created successfully with dynamic persona, recording and transcription (fallback)',
           sessionData: {
             jobTitle: sessionData.jobTitle,
             userName: sessionData.userName,
@@ -295,7 +309,7 @@ IMPORTANT REMINDERS:
             hasCustomCriteria: !!customCriteria,
             conversationId: conversation_id,
             dynamicPersonaId: dynamicPersonaId,
-            method: 'dynamic_persona'
+            method: 'dynamic_persona_with_recording'
           }
         });
 
@@ -326,7 +340,7 @@ IMPORTANT REMINDERS:
   }
 };
 
-// New endpoint to get conversation data including transcript and recording
+// Enhanced endpoint to get conversation data with VERBOSE MODE
 export const getConversation = async (
   req: Request,
   res: Response,
@@ -353,11 +367,12 @@ export const getConversation = async (
       return;
     }
 
-    console.log("🔍 Retrieving conversation data for:", conversationId);
+    console.log("🔍 Retrieving conversation data with VERBOSE MODE for:", conversationId);
 
     try {
+      // CRITICAL: Use verbose=true to get detailed transcript
       const conversationResponse = await axios.get(
-        `https://tavusapi.com/v2/conversations/${conversationId}`,
+        `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
         {
           headers: { 
             'x-api-key': TAVUS_API_KEY,
@@ -370,18 +385,55 @@ export const getConversation = async (
       const conversationData = conversationResponse.data;
       console.log('✅ Retrieved conversation data:', Object.keys(conversationData));
       
+      // Check for stored transcript from webhook first
+      const storedTranscript = global.conversationTranscripts?.[conversationId];
+      const storedRecording = global.conversationRecordings?.[conversationId];
+      
+      console.log('📝 Stored transcript available:', !!storedTranscript);
+      console.log('🎬 Stored recording available:', !!storedRecording);
+      
       // Extract and format transcript if available
       let formattedTranscript = '';
       let transcriptEvents: any[] = [];
       
-      if (conversationData.transcript) {
-        console.log('📝 Raw transcript available:', typeof conversationData.transcript);
+      // Use webhook transcript if available, otherwise use API response
+      const transcript = storedTranscript || conversationData.transcript;
+      
+      if (transcript) {
+        console.log('📝 Processing transcript:', typeof transcript);
         
-        // Handle different transcript formats
-        if (typeof conversationData.transcript === 'string') {
-          formattedTranscript = conversationData.transcript;
+        if (Array.isArray(transcript)) {
+          // Handle array format from webhook or verbose API
+          transcriptEvents = transcript.map((item, index) => {
+            let content = '';
+            let participant = 'user';
+            
+            if (typeof item === 'object') {
+              content = item.content || item.text || item.message || '';
+              participant = item.role === 'assistant' || item.participant === 'ai' || item.speaker === 'assistant' ? 'ai' : 'user';
+            } else if (typeof item === 'string') {
+              content = item;
+              participant = item.toLowerCase().includes('sarah') || item.toLowerCase().includes('interviewer') ? 'ai' : 'user';
+            }
+            
+            return {
+              timestamp: new Date().toISOString(),
+              type: 'conversation',
+              content: content,
+              participant: participant,
+              sessionId: conversationId,
+              index
+            };
+          });
+          
+          formattedTranscript = transcriptEvents.map(event => 
+            `${event.participant === 'ai' ? 'Interviewer (Sarah)' : 'Candidate'}: ${event.content}`
+          ).join('\n\n');
+          
+        } else if (typeof transcript === 'string') {
+          formattedTranscript = transcript;
           // Convert string transcript to events
-          const lines = formattedTranscript.split('\n').filter(line => line.trim());
+          const lines = transcript.split('\n').filter(line => line.trim());
           transcriptEvents = lines.map((line, index) => ({
             timestamp: new Date().toISOString(),
             type: 'conversation',
@@ -390,15 +442,12 @@ export const getConversation = async (
             sessionId: conversationId,
             index
           }));
-        } else if (Array.isArray(conversationData.transcript)) {
-          transcriptEvents = conversationData.transcript;
-          formattedTranscript = transcriptEvents.map(event => 
-            `${event.participant === 'ai' ? 'Interviewer (Sarah)' : 'Candidate'}: ${event.content}`
-          ).join('\n');
         }
         
         console.log('📄 Formatted transcript length:', formattedTranscript.length);
         console.log('📊 Transcript events count:', transcriptEvents.length);
+      } else {
+        console.warn('⚠️ No transcript found in API response or webhook storage');
       }
       
       res.status(200).json({
@@ -406,10 +455,12 @@ export const getConversation = async (
         conversation_id: conversationId,
         transcript: formattedTranscript,
         transcriptEvents: transcriptEvents,
-        recording_url: conversationData.recording_url || null,
-        download_url: conversationData.download_url || null,
+        recording_url: storedRecording?.recording_url || conversationData.recording_url || null,
+        download_url: storedRecording?.download_url || conversationData.download_url || null,
         status: conversationData.status || 'unknown',
         duration: conversationData.duration || null,
+        perception_analysis: conversationData.perception_analysis || null,
+        hasWebhookData: !!(storedTranscript || storedRecording),
         ...conversationData
       });
       
@@ -430,37 +481,48 @@ export const getConversation = async (
   }
 };
 
-// New webhook endpoint to receive conversation transcripts and recordings
+// Enhanced webhook endpoint to receive conversation transcripts and recordings
 export const conversationCallback = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { event_type, properties } = req.body;
+    const { event_type, properties, conversation_id } = req.body;
     
-    console.log('📞 Received conversation callback:', { event_type, properties });
+    console.log('📞 Received conversation callback:', { event_type, conversation_id, properties: Object.keys(properties || {}) });
     
     if (event_type === 'application.transcription_ready') {
-      const { conversation_id, transcript } = properties;
+      const { transcript } = properties;
       
       console.log('📝 Transcript ready for conversation:', conversation_id);
-      console.log('📄 Transcript content:', transcript);
+      console.log('📄 Transcript type:', typeof transcript);
+      console.log('📄 Transcript preview:', JSON.stringify(transcript).substring(0, 200) + '...');
       
-      // Store transcript for later analysis
-      // In a real app, you'd store this in a database
-      // For now, we'll just log it and make it available for analysis
+      // Store transcript for later retrieval
+      global.conversationTranscripts[conversation_id] = transcript;
+      console.log('✅ Stored transcript for conversation:', conversation_id);
       
     } else if (event_type === 'application.recording_ready') {
-      const { conversation_id, recording_url, download_url } = properties;
+      const { recording_url, download_url } = properties;
       
       console.log('🎬 Recording ready for conversation:', conversation_id);
       console.log('📹 Recording URL:', recording_url);
       console.log('⬇️ Download URL:', download_url);
       
       // Store recording URLs for later access
-      // In a real app, you'd store this in a database
+      global.conversationRecordings[conversation_id] = {
+        recording_url,
+        download_url,
+        timestamp: new Date().toISOString()
+      };
+      console.log('✅ Stored recording for conversation:', conversation_id);
       
+    } else if (event_type === 'system.shutdown') {
+      console.log('🛑 Conversation ended:', conversation_id, 'Reason:', properties?.shutdown_reason);
+      
+    } else {
+      console.log('📞 Other callback event:', event_type, 'for conversation:', conversation_id);
     }
     
     res.status(200).json({ success: true, message: 'Callback received' });
@@ -507,7 +569,7 @@ export const endConversation = async (
     let conversationData: any = {};
     try {
       const conversationDataResponse = await axios.get(
-        `https://tavusapi.com/v2/conversations/${conversationId}`,
+        `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
         {
           headers: { 
             'x-api-key': TAVUS_API_KEY,
@@ -520,13 +582,18 @@ export const endConversation = async (
       conversationData = conversationDataResponse.data;
       console.log('📊 Retrieved conversation data before ending:', Object.keys(conversationData));
       
-      // Extract and store real transcript and recording data
-      if (conversationData.transcript) {
-        console.log('📝 Real transcript available:', conversationData.transcript.length, 'characters');
+      // Also check webhook storage
+      const storedTranscript = global.conversationTranscripts?.[conversationId];
+      const storedRecording = global.conversationRecordings?.[conversationId];
+      
+      if (storedTranscript) {
+        conversationData.webhookTranscript = storedTranscript;
+        console.log('📝 Found webhook transcript data');
       }
       
-      if (conversationData.recording_url) {
-        console.log('🎬 Recording URL available:', conversationData.recording_url);
+      if (storedRecording) {
+        conversationData.webhookRecording = storedRecording;
+        console.log('🎬 Found webhook recording data');
       }
       
     } catch (dataError) {
@@ -621,7 +688,7 @@ export const analyzeInterview = async (
         console.log('🔍 Fetching REAL conversation data from Tavus API...');
         
         const conversationDataResponse = await axios.get(
-          `https://tavusapi.com/v2/conversations/${conversationId}`,
+          `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
           {
             headers: { 
               'x-api-key': TAVUS_API_KEY,
@@ -634,23 +701,48 @@ export const analyzeInterview = async (
         const conversationData = conversationDataResponse.data;
         console.log('📊 Retrieved conversation data from Tavus:', Object.keys(conversationData));
         
-        if (conversationData.transcript) {
-          realTranscript = conversationData.transcript;
+        // Check webhook storage first
+        const storedTranscript = global.conversationTranscripts?.[conversationId];
+        const transcript_to_use = storedTranscript || conversationData.transcript;
+        
+        if (transcript_to_use) {
           dataSource = 'real_conversation';
-          console.log('✅ Using REAL conversation transcript from Tavus API');
+          console.log('✅ Using REAL conversation transcript from', storedTranscript ? 'webhook' : 'API');
+          
+          // Process transcript based on format
+          if (Array.isArray(transcript_to_use)) {
+            // Handle array format
+            realTranscript = transcript_to_use.map((item: any) => {
+              const speaker = (item.role === 'assistant' || item.participant === 'ai') ? 'Interviewer (Sarah)' : `Candidate (${candidateName})`;
+              const content = item.content || item.text || item.message || item;
+              return `${speaker}: ${content}`;
+            }).join('\n\n');
+            
+            // Extract candidate answers
+            realAnswers = transcript_to_use
+              .filter((item: any) => {
+                const role = item.role || item.participant || 'user';
+                return role !== 'assistant' && role !== 'ai';
+              })
+              .map((item: any) => item.content || item.text || item.message || item)
+              .filter((content: string) => content && content.length > 20);
+              
+          } else if (typeof transcript_to_use === 'string') {
+            realTranscript = transcript_to_use;
+            
+            // Extract candidate answers from string transcript
+            const lines = transcript_to_use.split('\n');
+            realAnswers = lines
+              .filter(line => 
+                !line.toLowerCase().includes('sarah') && 
+                !line.toLowerCase().includes('interviewer') &&
+                line.trim().length > 20
+              )
+              .map(line => line.replace(/^.*?:\s*/, '').trim())
+              .filter(answer => answer.length > 20);
+          }
+          
           console.log('📄 Real transcript preview:', realTranscript.substring(0, 300) + '...');
-          
-          // Extract real answers from transcript
-          const lines = realTranscript.split('\n');
-          realAnswers = lines
-            .filter(line => 
-              (line.includes('Candidate') || line.includes(candidateName)) && 
-              !line.includes('Interviewer') && 
-              !line.includes('Sarah')
-            )
-            .map(line => line.replace(/^.*?:\s*/, '').trim())
-            .filter(answer => answer.length > 10); // Filter out very short responses
-          
           console.log('✅ Extracted', realAnswers.length, 'real answers from transcript');
         }
         

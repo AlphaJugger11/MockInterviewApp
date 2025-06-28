@@ -84,11 +84,13 @@ const Feedback = () => {
             // Extract candidate answers
             realAnswers = transcriptData
               .filter((event: any) => event.participant !== 'ai' && event.participant !== 'system')
-              .map((event: any) => event.content);
+              .map((event: any) => event.content)
+              .filter((content: string) => content && content.length > 20); // Filter meaningful responses
           }
           
           console.log('✅ Using stored conversation transcript');
           console.log('📄 Real transcript preview:', realTranscript?.substring(0, 200) + '...');
+          console.log('📊 Real answers extracted:', realAnswers.length);
         }
         
         // Call the analyze endpoint with real conversation data
@@ -242,16 +244,20 @@ const Feedback = () => {
 
   const downloadRecording = () => {
     if (recordingUrl) {
-      if (recordingUrl.startsWith('data:')) {
+      if (recordingUrl.startsWith('data:') || recordingUrl.startsWith('blob:')) {
         // Local recording - trigger download
         const link = document.createElement('a');
         link.href = recordingUrl;
-        link.download = `interview-recording-${sessionData.conversationId}.mp4`;
+        link.download = `interview-recording-${sessionData.conversationId}.${recordingMetadata?.format || 'webm'}`;
         link.click();
+        console.log('📹 Downloaded local recording');
       } else {
         // External URL - open in new tab
         window.open(recordingUrl, '_blank');
+        console.log('📹 Opened external recording URL');
       }
+    } else {
+      console.warn('⚠️ No recording URL available');
     }
   };
 
@@ -259,6 +265,12 @@ const Feedback = () => {
     const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
     if (storedTranscript) {
       const transcriptData = JSON.parse(storedTranscript);
+      
+      if (transcriptData.length === 0) {
+        console.warn('⚠️ Transcript is empty');
+        alert('No transcript data available. The conversation may not have been recorded properly.');
+        return;
+      }
       
       // Format transcript properly
       const formattedTranscript = transcriptData.map((event: any) => {
@@ -276,6 +288,8 @@ Company: ${sessionData.company}
 Date: ${sessionData.date}
 Duration: ${sessionData.duration}
 Conversation ID: ${sessionData.conversationId}
+Data Source: Real Conversation
+Events Count: ${transcriptData.length}
 
 TRANSCRIPT:
 ===========
@@ -295,6 +309,7 @@ TRANSCRIPT:
       console.log('📄 Transcript downloaded successfully');
     } else {
       console.warn('⚠️ No transcript data available for download');
+      alert('No transcript data available. The conversation may not have been recorded properly.');
     }
   };
 
@@ -348,7 +363,8 @@ TRANSCRIPT:
                     </p>
                     {recordingMetadata && (
                       <p className="text-white/40 text-xs mt-1">
-                        Format: {recordingMetadata.format || 'mp4'} • Source: {recordingMetadata.source || 'Tavus Cloud'}
+                        Format: {recordingMetadata.format || 'webm'} • Source: {recordingMetadata.source || 'Tavus Cloud'}
+                        {recordingMetadata.size && ` • Size: ${Math.round(recordingMetadata.size / 1024 / 1024)}MB`}
                       </p>
                     )}
                   </div>
@@ -392,6 +408,14 @@ TRANSCRIPT:
                 <div className="mb-4 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
                   <p className="text-green-600 dark:text-green-400 text-sm font-medium">
                     ✅ This analysis is based on your actual conversation transcript and real-time metrics from Tavus
+                  </p>
+                </div>
+              )}
+              
+              {analysisData.dataSource === 'fallback_personalized' && (
+                <div className="mb-4 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                  <p className="text-yellow-600 dark:text-yellow-400 text-sm font-medium">
+                    ⚠️ This analysis uses enhanced sample data personalized for your session. Real conversation data may not have been captured properly.
                   </p>
                 </div>
               )}
