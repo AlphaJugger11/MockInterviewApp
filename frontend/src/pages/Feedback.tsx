@@ -259,18 +259,42 @@ const Feedback = () => {
     const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
     if (storedTranscript) {
       const transcriptData = JSON.parse(storedTranscript);
+      
+      // Format transcript properly
       const formattedTranscript = transcriptData.map((event: any) => {
         const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${sessionData.userName})`;
-        return `[${event.timestamp}] ${speaker}: ${event.content}`;
+        const timestamp = new Date(event.timestamp).toLocaleTimeString();
+        return `[${timestamp}] ${speaker}: ${event.content}`;
       }).join('\n\n');
       
-      const blob = new Blob([formattedTranscript], { type: 'text/plain' });
+      // Add header information
+      const header = `INTERVIEW TRANSCRIPT
+===================
+Candidate: ${sessionData.userName}
+Job Title: ${sessionData.role}
+Company: ${sessionData.company}
+Date: ${sessionData.date}
+Duration: ${sessionData.duration}
+Conversation ID: ${sessionData.conversationId}
+
+TRANSCRIPT:
+===========
+
+`;
+      
+      const fullTranscript = header + formattedTranscript;
+      
+      const blob = new Blob([fullTranscript], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `interview-transcript-${sessionData.conversationId}.txt`;
+      link.download = `interview-transcript-${sessionData.userName}-${sessionData.date}.txt`;
       link.click();
       URL.revokeObjectURL(url);
+      
+      console.log('📄 Transcript downloaded successfully');
+    } else {
+      console.warn('⚠️ No transcript data available for download');
     }
   };
 
@@ -324,7 +348,7 @@ const Feedback = () => {
                     </p>
                     {recordingMetadata && (
                       <p className="text-white/40 text-xs mt-1">
-                        Format: {recordingMetadata.format || 'mp4'} • Size: {recordingMetadata.size ? Math.round(recordingMetadata.size / 1024 / 1024) + 'MB' : 'Unknown'}
+                        Format: {recordingMetadata.format || 'mp4'} • Source: {recordingMetadata.source || 'Tavus Cloud'}
                       </p>
                     )}
                   </div>

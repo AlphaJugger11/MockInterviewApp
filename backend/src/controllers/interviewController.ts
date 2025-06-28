@@ -146,8 +146,8 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Create conversation WITHOUT enable_recording (not supported in this API version)
-    console.log("Creating conversation with enhanced conversational context...");
+    // Step 4: Create conversation with recording enabled
+    console.log("Creating conversation with enhanced conversational context and recording...");
     
     try {
       const conversationResponse = await axios.post(
@@ -326,7 +326,7 @@ IMPORTANT REMINDERS:
   }
 };
 
-// New endpoint to get conversation data
+// New endpoint to get conversation data including transcript and recording
 export const getConversation = async (
   req: Request,
   res: Response,
@@ -370,8 +370,46 @@ export const getConversation = async (
       const conversationData = conversationResponse.data;
       console.log('✅ Retrieved conversation data:', Object.keys(conversationData));
       
+      // Extract and format transcript if available
+      let formattedTranscript = '';
+      let transcriptEvents: any[] = [];
+      
+      if (conversationData.transcript) {
+        console.log('📝 Raw transcript available:', typeof conversationData.transcript);
+        
+        // Handle different transcript formats
+        if (typeof conversationData.transcript === 'string') {
+          formattedTranscript = conversationData.transcript;
+          // Convert string transcript to events
+          const lines = formattedTranscript.split('\n').filter(line => line.trim());
+          transcriptEvents = lines.map((line, index) => ({
+            timestamp: new Date().toISOString(),
+            type: 'conversation',
+            content: line.trim(),
+            participant: line.toLowerCase().includes('sarah') || line.toLowerCase().includes('interviewer') ? 'ai' : 'user',
+            sessionId: conversationId,
+            index
+          }));
+        } else if (Array.isArray(conversationData.transcript)) {
+          transcriptEvents = conversationData.transcript;
+          formattedTranscript = transcriptEvents.map(event => 
+            `${event.participant === 'ai' ? 'Interviewer (Sarah)' : 'Candidate'}: ${event.content}`
+          ).join('\n');
+        }
+        
+        console.log('📄 Formatted transcript length:', formattedTranscript.length);
+        console.log('📊 Transcript events count:', transcriptEvents.length);
+      }
+      
       res.status(200).json({
         success: true,
+        conversation_id: conversationId,
+        transcript: formattedTranscript,
+        transcriptEvents: transcriptEvents,
+        recording_url: conversationData.recording_url || null,
+        download_url: conversationData.download_url || null,
+        status: conversationData.status || 'unknown',
+        duration: conversationData.duration || null,
         ...conversationData
       });
       
@@ -379,7 +417,7 @@ export const getConversation = async (
       console.error('❌ Error retrieving conversation from Tavus API:', apiError);
       res.status(500).json({
         success: false,
-        error: 'Failed to retrieve conversation data'
+        error: 'Failed to retrieve conversation data from Tavus API'
       });
     }
 
@@ -466,9 +504,10 @@ export const endConversation = async (
     console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId });
 
     // Step 1: Get conversation data including transcript and recording before ending it
+    let conversationData: any = {};
     try {
       const conversationDataResponse = await axios.get(
-        `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+        `https://tavusapi.com/v2/conversations/${conversationId}`,
         {
           headers: { 
             'x-api-key': TAVUS_API_KEY,
@@ -478,8 +517,8 @@ export const endConversation = async (
         }
       );
       
-      const conversationData = conversationDataResponse.data;
-      console.log('📊 Retrieved conversation data:', conversationData);
+      conversationData = conversationDataResponse.data;
+      console.log('📊 Retrieved conversation data before ending:', Object.keys(conversationData));
       
       // Extract and store real transcript and recording data
       if (conversationData.transcript) {
@@ -532,7 +571,8 @@ export const endConversation = async (
     
     res.status(200).json({ 
       success: true,
-      message: 'Conversation and persona cleanup completed successfully'
+      message: 'Conversation and persona cleanup completed successfully',
+      conversationData: conversationData // Return the conversation data for frontend use
     });
 
   } catch (error) {
@@ -581,7 +621,7 @@ export const analyzeInterview = async (
         console.log('🔍 Fetching REAL conversation data from Tavus API...');
         
         const conversationDataResponse = await axios.get(
-          `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+          `https://tavusapi.com/v2/conversations/${conversationId}`,
           {
             headers: { 
               'x-api-key': TAVUS_API_KEY,

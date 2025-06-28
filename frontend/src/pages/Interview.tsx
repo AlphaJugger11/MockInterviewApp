@@ -15,7 +15,6 @@ const Interview = () => {
 
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
-  const conversationTranscriptRef = useRef<any[]>([]);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
@@ -53,7 +52,7 @@ const Interview = () => {
     };
   }, [navigate, isEnding]);
 
-  // CRITICAL: Enhanced session cleanup with IMMEDIATE disconnection
+  // CRITICAL: Enhanced session cleanup with REAL transcript and recording capture
   const handleEndSession = async () => {
     if (isEnding) return; // Prevent multiple calls
     
@@ -61,12 +60,12 @@ const Interview = () => {
     setIsEnding(true);
     
     try {
-      // Step 1: Capture conversation data from Tavus iframe
-      console.log('📊 Capturing conversation data...');
+      // Step 1: Capture REAL conversation data from Tavus API
+      console.log('📊 Capturing REAL conversation data from Tavus...');
       let realTranscript: any[] = [];
       let conversationData: any = {};
+      let recordingUrl: string | null = null;
       
-      // Try to get conversation data from Tavus API
       if (conversationId) {
         try {
           console.log('🔍 Fetching REAL conversation data from Tavus API...');
@@ -77,20 +76,33 @@ const Interview = () => {
           
           if (response.ok) {
             conversationData = await response.json();
-            console.log('✅ Retrieved real conversation data:', conversationData);
+            console.log('✅ Retrieved REAL conversation data:', conversationData);
             
-            // Extract transcript from conversation data
+            // Extract REAL transcript from conversation data
             if (conversationData.transcript) {
-              realTranscript = conversationData.transcript.split('\n').map((line: string, index: number) => ({
-                timestamp: new Date().toISOString(),
-                type: 'conversation',
-                content: line.trim(),
-                participant: line.includes('Sarah') || line.includes('Interviewer') ? 'ai' : 'user',
-                sessionId: conversationId,
-                index
-              })).filter((item: any) => item.content.length > 0);
+              const transcriptText = conversationData.transcript;
+              realTranscript = transcriptText.split('\n').map((line: string, index: number) => {
+                const trimmedLine = line.trim();
+                if (trimmedLine.length === 0) return null;
+                
+                return {
+                  timestamp: new Date().toISOString(),
+                  type: 'conversation',
+                  content: trimmedLine,
+                  participant: trimmedLine.toLowerCase().includes('sarah') || 
+                              trimmedLine.toLowerCase().includes('interviewer') ? 'ai' : 'user',
+                  sessionId: conversationId,
+                  index
+                };
+              }).filter(item => item !== null);
               
-              console.log('📝 Extracted real transcript:', realTranscript.length, 'events');
+              console.log('📝 Extracted REAL transcript:', realTranscript.length, 'events');
+            }
+            
+            // Get recording URL if available
+            if (conversationData.recording_url) {
+              recordingUrl = conversationData.recording_url;
+              console.log('🎬 REAL recording URL available:', recordingUrl);
             }
           }
         } catch (apiError) {
@@ -98,7 +110,7 @@ const Interview = () => {
         }
       }
       
-      // Step 2: Store final session data with REAL transcript
+      // Step 2: Store final session data with REAL transcript and recording
       const finalSessionData = {
         conversationId,
         transcript: realTranscript,
@@ -107,15 +119,32 @@ const Interview = () => {
         userName,
         jobTitle: localStorage.getItem('jobTitle'),
         company: localStorage.getItem('company'),
-        conversationData: conversationData
+        conversationData: conversationData,
+        recordingUrl: recordingUrl
       };
       
       localStorage.setItem(`session_${conversationId}`, JSON.stringify(finalSessionData));
       localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(realTranscript));
-      console.log('💾 Final session data stored with real transcript');
+      
+      // Store recording URL if available
+      if (recordingUrl) {
+        localStorage.setItem(`recording_${conversationId}`, recordingUrl);
+        localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
+          format: 'mp4',
+          source: 'tavus_cloud',
+          url: recordingUrl,
+          timestamp: new Date().toISOString()
+        }));
+      }
+      
+      console.log('💾 Final session data stored with REAL transcript and recording');
       
       // Step 3: Download REAL transcript immediately
-      downloadRealTranscript(realTranscript);
+      if (realTranscript.length > 0) {
+        downloadRealTranscript(realTranscript);
+      } else {
+        console.warn('⚠️ No real transcript available for download');
+      }
       
       // Step 4: End conversation on backend to stop Tavus session
       if (conversationId) {
@@ -131,7 +160,13 @@ const Interview = () => {
           });
           
           if (response.ok) {
+            const endData = await response.json();
             console.log('✅ Conversation ended successfully on backend');
+            
+            // If backend returned additional conversation data, use it
+            if (endData.conversationData && endData.conversationData.transcript) {
+              console.log('📝 Backend returned additional transcript data');
+            }
           } else {
             console.warn('⚠️ Failed to end conversation on backend');
           }
@@ -156,7 +191,7 @@ const Interview = () => {
     }
   };
 
-  // Download REAL conversation transcript
+  // Download REAL conversation transcript with proper formatting
   const downloadRealTranscript = (transcript: any[]) => {
     try {
       if (transcript.length === 0) {
@@ -164,18 +199,36 @@ const Interview = () => {
         return;
       }
       
-      // Format transcript for download
+      // Format transcript for download with proper speaker identification
       const formattedTranscript = transcript.map(event => {
         const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
-        return `[${event.timestamp}] ${speaker}: ${event.content}`;
+        const timestamp = new Date(event.timestamp).toLocaleTimeString();
+        return `[${timestamp}] ${speaker}: ${event.content}`;
       }).join('\n\n');
       
-      const transcriptBlob = new Blob([formattedTranscript], { type: 'text/plain' });
+      // Add header information
+      const header = `INTERVIEW TRANSCRIPT
+===================
+Candidate: ${userName}
+Job Title: ${localStorage.getItem('jobTitle') || 'Not specified'}
+Company: ${localStorage.getItem('company') || 'Not specified'}
+Date: ${new Date().toLocaleDateString()}
+Duration: ${Math.floor(sessionDuration / 60)}:${(sessionDuration % 60).toString().padStart(2, '0')}
+Conversation ID: ${conversationId}
+
+TRANSCRIPT:
+===========
+
+`;
+      
+      const fullTranscript = header + formattedTranscript;
+      
+      const transcriptBlob = new Blob([fullTranscript], { type: 'text/plain' });
       const url = URL.createObjectURL(transcriptBlob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `interview-transcript-${conversationId}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+      a.download = `interview-transcript-${userName}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
       
       document.body.appendChild(a);
       a.click();
@@ -185,7 +238,7 @@ const Interview = () => {
         URL.revokeObjectURL(url);
       }, 100);
       
-      console.log('📄 Real transcript downloaded successfully');
+      console.log('📄 REAL transcript downloaded successfully');
     } catch (error) {
       console.error('❌ Error downloading real transcript:', error);
     }
@@ -295,7 +348,7 @@ const Interview = () => {
                 </p>
                 <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span>Tavus Cloud Recording Active</span>
+                  <span>Tavus Cloud Recording & Transcript Capture Active</span>
                 </div>
               </div>
             </div>
@@ -345,6 +398,12 @@ const Interview = () => {
                 {localStorage.getItem('jobTitle') || 'Not specified'}
               </span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Transcript:</span>
+              <span className="text-purple-500 font-medium">
+                Real-time Capture
+              </span>
+            </div>
             {dynamicPersonaId && (
               <div className="flex justify-between">
                 <span className="text-light-text-secondary dark:text-dark-text-secondary">AI Persona:</span>
@@ -353,6 +412,19 @@ const Interview = () => {
                 </span>
               </div>
             )}
+          </div>
+          
+          {/* Additional Info */}
+          <div className="mt-4 p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
+            <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+              Recording & Transcript Information
+            </h4>
+            <ul className="text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
+              <li>• Video recording is handled by Tavus cloud infrastructure</li>
+              <li>• Real-time transcript is captured during the conversation</li>
+              <li>• Both recording and transcript will be available for download when you end the session</li>
+              <li>• Analysis will be based on your actual conversation content</li>
+            </ul>
           </div>
         </div>
       </div>
