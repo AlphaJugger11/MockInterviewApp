@@ -4,16 +4,16 @@ import { validateInterviewRequest, validateConversationRequest } from '../middle
 
 const router = express.Router();
 
-// POST /api/interview/create-conversation - Enhanced dynamic persona endpoint
+// POST /api/interview/create-conversation - Enhanced dynamic persona endpoint with recording
 router.post('/create-conversation', validateConversationRequest, createConversation);
 
 // POST /api/interview/end-conversation - New endpoint to terminate sessions
 router.post('/end-conversation', endConversation);
 
-// POST /api/interview/analyze - New endpoint for AI-powered analysis
+// POST /api/interview/analyze - New endpoint for AI-powered analysis with real data
 router.post('/analyze', analyzeInterview);
 
-// POST /api/interview/conversation-callback - Webhook for conversation transcripts
+// POST /api/interview/conversation-callback - Webhook for conversation transcripts and recordings
 router.post('/conversation-callback', conversationCallback);
 
 // POST /api/interview/start - Legacy endpoint

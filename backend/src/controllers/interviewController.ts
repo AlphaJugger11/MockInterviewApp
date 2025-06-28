@@ -146,16 +146,17 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Try creating conversation with conversational context first (more reliable)
-    console.log("Creating conversation with enhanced conversational context...");
+    // Step 4: Create conversation with recording enabled
+    console.log("Creating conversation with enhanced conversational context and recording...");
     
     try {
       const conversationResponse = await axios.post(
         'https://tavusapi.com/v2/conversations',
         {
           replica_id: TAVUS_REPLICA_ID,
-          conversational_context: conversationalContext, // Use conversational context for immediate application
-          callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`, // Add callback for transcript
+          conversational_context: conversationalContext,
+          callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`,
+          enable_recording: true, // Enable Tavus recording
           properties: {
             max_call_duration: 1200, // 20 minutes max call duration
             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
@@ -177,7 +178,7 @@ IMPORTANT REMINDERS:
         throw new Error('No conversation URL or ID received from Tavus API');
       }
       
-      console.log('✅ Conversation created successfully with conversational context. URL:', conversation_url, 'ID:', conversation_id);
+      console.log('✅ Conversation created successfully with recording enabled. URL:', conversation_url, 'ID:', conversation_id);
 
       // Step 5: Store session data for later analysis
       const sessionData = {
@@ -188,6 +189,7 @@ IMPORTANT REMINDERS:
         feedbackMetrics: feedbackMetrics || {},
         conversationId: conversation_id,
         conversationalContext: conversationalContext,
+        recordingEnabled: true,
         timestamp: new Date().toISOString()
       };
       
@@ -198,6 +200,7 @@ IMPORTANT REMINDERS:
         customCriteria: sessionData.customCriteria,
         feedbackMetrics: sessionData.feedbackMetrics,
         conversationalContext: sessionData.conversationalContext.substring(0, 100) + "...",
+        recordingEnabled: sessionData.recordingEnabled,
         timestamp: sessionData.timestamp
       });
       
@@ -205,13 +208,14 @@ IMPORTANT REMINDERS:
         success: true,
         conversation_url,
         conversation_id,
-        message: 'Interview conversation created successfully with enhanced context',
+        message: 'Interview conversation created successfully with recording enabled',
         sessionData: {
           jobTitle: sessionData.jobTitle,
           userName: sessionData.userName,
           hasCustomInstructions: !!customInstructions,
           hasCustomCriteria: !!customCriteria,
           conversationId: conversation_id,
+          recordingEnabled: true,
           method: 'conversational_context'
         }
       });
@@ -242,13 +246,14 @@ IMPORTANT REMINDERS:
         const dynamicPersonaId = personaResponse.data.persona_id;
         console.log("✅ Dynamic persona created as fallback:", dynamicPersonaId);
 
-        // Create conversation with the dynamic persona
+        // Create conversation with the dynamic persona and recording
         const conversationResponse = await axios.post(
           'https://tavusapi.com/v2/conversations',
           {
             replica_id: TAVUS_REPLICA_ID,
             persona_id: dynamicPersonaId,
             callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`,
+            enable_recording: true, // Enable Tavus recording
             properties: {
               max_call_duration: 1200,
               participant_absent_timeout: 300,
@@ -270,7 +275,7 @@ IMPORTANT REMINDERS:
           throw new Error('No conversation URL or ID received from Tavus API');
         }
         
-        console.log('✅ Conversation created successfully with dynamic persona. URL:', conversation_url, 'ID:', conversation_id);
+        console.log('✅ Conversation created successfully with dynamic persona and recording. URL:', conversation_url, 'ID:', conversation_id);
 
         const sessionData = {
           jobTitle: jobTitle.trim(),
@@ -280,6 +285,7 @@ IMPORTANT REMINDERS:
           feedbackMetrics: feedbackMetrics || {},
           dynamicPersonaId: dynamicPersonaId,
           conversationId: conversation_id,
+          recordingEnabled: true,
           timestamp: new Date().toISOString()
         };
         
@@ -287,7 +293,7 @@ IMPORTANT REMINDERS:
           success: true,
           conversation_url,
           conversation_id,
-          message: 'Interview conversation created successfully with dynamic persona (fallback)',
+          message: 'Interview conversation created successfully with dynamic persona and recording (fallback)',
           sessionData: {
             jobTitle: sessionData.jobTitle,
             userName: sessionData.userName,
@@ -295,6 +301,7 @@ IMPORTANT REMINDERS:
             hasCustomCriteria: !!customCriteria,
             conversationId: conversation_id,
             dynamicPersonaId: dynamicPersonaId,
+            recordingEnabled: true,
             method: 'dynamic_persona'
           }
         });
@@ -326,7 +333,7 @@ IMPORTANT REMINDERS:
   }
 };
 
-// New webhook endpoint to receive conversation transcripts
+// New webhook endpoint to receive conversation transcripts and recordings
 export const conversationCallback = async (
   req: Request,
   res: Response,
@@ -347,8 +354,16 @@ export const conversationCallback = async (
       // In a real app, you'd store this in a database
       // For now, we'll just log it and make it available for analysis
       
-      // You could also trigger real-time analysis here
-      // await analyzeConversationTranscript(conversation_id, transcript);
+    } else if (event_type === 'application.recording_ready') {
+      const { conversation_id, recording_url, download_url } = properties;
+      
+      console.log('🎬 Recording ready for conversation:', conversation_id);
+      console.log('📹 Recording URL:', recording_url);
+      console.log('⬇️ Download URL:', download_url);
+      
+      // Store recording URLs for later access
+      // In a real app, you'd store this in a database
+      
     }
     
     res.status(200).json({ success: true, message: 'Callback received' });
@@ -391,7 +406,7 @@ export const endConversation = async (
 
     console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId });
 
-    // Step 1: Get conversation data before ending it
+    // Step 1: Get conversation data including transcript and recording before ending it
     try {
       const conversationDataResponse = await axios.get(
         `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
@@ -400,15 +415,21 @@ export const endConversation = async (
             'x-api-key': TAVUS_API_KEY,
             'Content-Type': 'application/json'
           },
-          timeout: 10000
+          timeout: 15000
         }
       );
       
       const conversationData = conversationDataResponse.data;
       console.log('📊 Retrieved conversation data:', conversationData);
       
-      // Store conversation data for analysis
-      // In a real app, you'd store this in a database
+      // Extract and store real transcript and recording data
+      if (conversationData.transcript) {
+        console.log('📝 Real transcript available:', conversationData.transcript.length, 'characters');
+      }
+      
+      if (conversationData.recording_url) {
+        console.log('🎬 Recording URL available:', conversationData.recording_url);
+      }
       
     } catch (dataError) {
       console.warn('⚠️ Error retrieving conversation data:', dataError);
@@ -464,7 +485,7 @@ export const endConversation = async (
   }
 };
 
-// Enhanced function to analyze interview and generate feedback using real conversation data
+// Enhanced function to analyze interview using REAL conversation data
 export const analyzeInterview = async (
   req: Request,
   res: Response,
@@ -489,7 +510,7 @@ export const analyzeInterview = async (
     const candidateName = userName || 'Candidate';
     const targetRole = jobTitle || 'Professional';
 
-    // Try to get real conversation data if conversationId is provided
+    // Try to get REAL conversation data from Tavus API
     let realTranscript = transcript;
     let realAnswers = answers || [];
     let realMetrics = {};
@@ -498,6 +519,8 @@ export const analyzeInterview = async (
     if (conversationId) {
       try {
         const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
+        console.log('🔍 Fetching REAL conversation data from Tavus API...');
+        
         const conversationDataResponse = await axios.get(
           `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
           {
@@ -505,22 +528,31 @@ export const analyzeInterview = async (
               'x-api-key': TAVUS_API_KEY,
               'Content-Type': 'application/json'
             },
-            timeout: 10000
+            timeout: 15000
           }
         );
         
         const conversationData = conversationDataResponse.data;
+        console.log('📊 Retrieved conversation data from Tavus:', Object.keys(conversationData));
         
         if (conversationData.transcript) {
           realTranscript = conversationData.transcript;
           dataSource = 'real_conversation';
-          console.log('✅ Using real conversation transcript from Tavus API');
+          console.log('✅ Using REAL conversation transcript from Tavus API');
+          console.log('📄 Real transcript preview:', realTranscript.substring(0, 300) + '...');
           
           // Extract real answers from transcript
           const lines = realTranscript.split('\n');
           realAnswers = lines
-            .filter(line => line.includes('Candidate') || line.includes(candidateName))
-            .map(line => line.replace(/^.*?:\s*/, ''));
+            .filter(line => 
+              (line.includes('Candidate') || line.includes(candidateName)) && 
+              !line.includes('Interviewer') && 
+              !line.includes('Sarah')
+            )
+            .map(line => line.replace(/^.*?:\s*/, '').trim())
+            .filter(answer => answer.length > 10); // Filter out very short responses
+          
+          console.log('✅ Extracted', realAnswers.length, 'real answers from transcript');
         }
         
         if (conversationData.perception_analysis) {
@@ -529,7 +561,8 @@ export const analyzeInterview = async (
         }
         
       } catch (apiError) {
-        console.warn('⚠️ Could not retrieve real conversation data from Tavus API, using provided data');
+        console.warn('⚠️ Could not retrieve real conversation data from Tavus API:', apiError);
+        console.log('📝 Using provided transcript data instead');
       }
     }
 
@@ -559,17 +592,22 @@ IMPORTANT CONTEXT:
 - Candidate Name: ${candidateName}
 - Job Title: ${targetRole}
 - Data Source: ${dataSource}
+- This is ${dataSource === 'real_conversation' ? 'REAL conversation data from an actual interview' : 'simulated interview data'}
 
 TRANSCRIPT:
 ${analysisTranscript}
 
+REAL ANSWERS EXTRACTED:
+${realAnswers.length > 0 ? realAnswers.map((answer, i) => `${i + 1}. ${answer}`).join('\n') : 'No real answers extracted - using transcript content'}
+
 INSTRUCTIONS:
-- Provide personalized feedback that mentions ${candidateName} by name
-- Tailor all feedback specifically for the ${targetRole} role
+- Provide personalized feedback that mentions ${candidateName} by name throughout
+- Tailor ALL feedback specifically for the ${targetRole} role
 - Be specific about what ${candidateName} did well and what they can improve
 - Make recommendations specific to ${candidateName}'s performance and the ${targetRole} role
 - Extract ACTUAL answers from the transcript, not generic ones
-- Use the real conversation content to provide accurate feedback
+- Use the real conversation content to provide accurate, specific feedback
+- If this is real conversation data, mention that the analysis is based on their actual interview
 
 Please return ONLY a valid JSON object (no markdown formatting) with the following structure:
 {
@@ -583,14 +621,14 @@ Please return ONLY a valid JSON object (no markdown formatting) with the followi
     {
       "question": "string (actual question from transcript)",
       "answer": "string (actual answer from transcript)", 
-      "feedback": "string (personalized for ${candidateName})",
+      "feedback": "string (personalized for ${candidateName} and ${targetRole})",
       "score": number (0-100),
       "strengths": ["string"],
       "areasForImprovement": ["string"]
     }
   ],
-  "summary": "string (personalized summary mentioning ${candidateName} and ${targetRole})",
-  "recommendations": ["string (specific recommendations for ${candidateName})"]
+  "summary": "string (personalized summary mentioning ${candidateName} and ${targetRole}, note if based on real data)",
+  "recommendations": ["string (specific recommendations for ${candidateName} applying for ${targetRole})"]
 }
 
 Provide realistic scores based on the actual content. Be constructive and specific in feedback. Focus on communication skills, answer structure, and professional presentation. Make sure ALL feedback is personalized for ${candidateName} applying for the ${targetRole} role. Return ONLY the JSON object without any markdown formatting.`;
@@ -627,13 +665,15 @@ Provide realistic scores based on the actual content. Be constructive and specif
         analysisData.dataSource = dataSource;
         
         console.log('✅ Interview analysis completed for session:', sessionId);
+        console.log('📊 Analysis based on:', dataSource);
         
         res.status(200).json({
           success: true,
           sessionId,
           analysis: analysisData,
-          message: 'Interview analysis completed successfully',
-          dataSource: dataSource
+          message: `Interview analysis completed successfully using ${dataSource}`,
+          dataSource: dataSource,
+          realAnswersCount: realAnswers.length
         });
         
       } catch (parseError) {

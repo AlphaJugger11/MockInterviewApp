@@ -20,11 +20,10 @@ const Interview = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const sessionStartTimeRef = useRef<number>(Date.now());
 
-  // Real conversation capture
+  // Real conversation capture using Daily.js
   const conversationTranscriptRef = useRef<any[]>([]);
   const speechMetricsRef = useRef<any>({});
-  const audioAnalyserRef = useRef<AnalyserNode | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const dailyCallRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
@@ -50,17 +49,7 @@ const Interview = () => {
     // Initialize user media and recording
     const initializeMedia = async () => {
       try {
-        // Request screen capture instead of just camera
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
-          video: { 
-            width: { ideal: 1920 }, 
-            height: { ideal: 1080 },
-            frameRate: { ideal: 30 }
-          }, 
-          audio: true
-        });
-        
-        // Also get user camera for picture-in-picture
+        // Get user camera and microphone for local preview
         const userStream = await navigator.mediaDevices.getUserMedia({ 
           video: { 
             width: { ideal: 640 }, 
@@ -76,93 +65,24 @@ const Interview = () => {
           } 
         });
         
-        // Combine both streams
-        const combinedStream = new MediaStream([
-          ...displayStream.getVideoTracks(),
-          ...userStream.getAudioTracks()
-        ]);
-        
-        streamRef.current = combinedStream;
+        streamRef.current = userStream;
         
         if (userVideoRef.current) {
           userVideoRef.current.srcObject = userStream; // Show user camera in preview
         }
 
-        // Initialize audio analysis for speech metrics
-        initializeAudioAnalysis(userStream);
-
-        // Check supported MIME types in order of preference
-        const mimeTypes = [
-          'video/webm;codecs=vp9,opus',
-          'video/webm;codecs=vp8,opus', 
-          'video/webm;codecs=h264,opus',
-          'video/webm',
-          'video/mp4'
-        ];
-
-        let selectedMimeType = '';
-        for (const mimeType of mimeTypes) {
-          if (MediaRecorder.isTypeSupported(mimeType)) {
-            selectedMimeType = mimeType;
-            break;
-          }
+        // Initialize Daily.js for conversation capture and recording
+        if (url) {
+          initializeDailyCapture(url, id!);
         }
 
-        if (!selectedMimeType) {
-          throw new Error('No supported video recording format found');
-        }
-
-        console.log('Using MIME type:', selectedMimeType);
-
-        // Initialize MediaRecorder with optimal settings for screen recording
-        const mediaRecorder = new MediaRecorder(combinedStream, {
-          mimeType: selectedMimeType,
-          videoBitsPerSecond: 5000000, // 5 Mbps for screen recording
-          audioBitsPerSecond: 128000   // 128 kbps for clear audio
-        });
-        
-        mediaRecorderRef.current = mediaRecorder;
-        recordedChunksRef.current = [];
-
-        // Handle data available event
-        mediaRecorder.ondataavailable = (event) => {
-          console.log('Data chunk received:', event.data.size, 'bytes');
-          if (event.data && event.data.size > 0) {
-            recordedChunksRef.current.push(event.data);
-            // Update recording size for monitoring
-            const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
-            setRecordingSize(totalSize);
-          }
-        };
-
-        // Handle recording stop
-        mediaRecorder.onstop = () => {
-          const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
-          console.log('Recording stopped. Total chunks:', recordedChunksRef.current.length);
-          console.log('Total recording size:', totalSize, 'bytes');
-          setRecordingSize(totalSize);
-        };
-
-        // Handle errors
-        mediaRecorder.onerror = (event) => {
-          console.error('MediaRecorder error:', event);
-          setError('Recording error occurred. Please try again.');
-        };
-
-        // Start recording with frequent data capture for reliability
-        mediaRecorder.start(1000); // Capture data every 1 second
         setIsRecording(true);
         sessionStartTimeRef.current = Date.now();
-        console.log('Screen recording started with format:', selectedMimeType);
-
-        // Initialize conversation capture after media is ready
-        if (url) {
-          initializeConversationCapture(url, id!);
-        }
+        console.log('✅ Media initialized successfully');
 
       } catch (err) {
         console.error("Failed to get user media:", err);
-        setError("Failed to access screen and microphone. Please check your permissions and try again.");
+        setError("Failed to access camera and microphone. Please check your permissions and try again.");
       }
     };
 
@@ -179,245 +99,215 @@ const Interview = () => {
     };
   }, [navigate]);
 
-  // Initialize audio analysis for real speech metrics
-  const initializeAudioAnalysis = (stream: MediaStream) => {
+  // Initialize Daily.js for real conversation capture and Tavus recording
+  const initializeDailyCapture = async (conversationUrl: string, conversationId: string) => {
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const analyser = audioContext.createAnalyser();
-      const microphone = audioContext.createMediaStreamSource(stream);
+      console.log('🎯 Initializing Daily.js for conversation capture and recording...');
       
-      analyser.fftSize = 256;
-      microphone.connect(analyser);
-      
-      audioContextRef.current = audioContext;
-      audioAnalyserRef.current = analyser;
-      
-      // Start monitoring audio levels
-      monitorAudioLevels();
-      
-      console.log('✅ Audio analysis initialized');
-    } catch (error) {
-      console.error('Error initializing audio analysis:', error);
-    }
-  };
-
-  // Monitor audio levels for speech detection
-  const monitorAudioLevels = () => {
-    if (!audioAnalyserRef.current) return;
-    
-    const analyser = audioAnalyserRef.current;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    
-    const checkAudioLevel = () => {
-      analyser.getByteFrequencyData(dataArray);
-      
-      // Calculate average audio level
-      const average = dataArray.reduce((acc, value) => acc + value, 0) / bufferLength;
-      const normalizedLevel = average / 255;
-      
-      // Store speech metrics
-      const metrics = {
-        timestamp: new Date().toISOString(),
-        audioLevel: normalizedLevel,
-        speaking: normalizedLevel > 0.1, // Threshold for speaking detection
-        sessionId: conversationId
-      };
-      
-      speechMetricsRef.current = { ...speechMetricsRef.current, ...metrics };
-      
-      // Store in localStorage periodically
-      if (Math.random() < 0.1) { // Store every ~10 frames to avoid excessive writes
-        const existingMetrics = JSON.parse(localStorage.getItem(`metrics_${conversationId}`) || '[]');
-        existingMetrics.push(metrics);
-        localStorage.setItem(`metrics_${conversationId}`, JSON.stringify(existingMetrics));
+      // Load Daily.js if not already loaded
+      if (!(window as any).DailyIframe) {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/@daily-co/daily-js';
+        script.onload = () => {
+          setupDailyCall(conversationUrl, conversationId);
+        };
+        document.head.appendChild(script);
+      } else {
+        setupDailyCall(conversationUrl, conversationId);
       }
-      
-      requestAnimationFrame(checkAudioLevel);
-    };
-    
-    checkAudioLevel();
-  };
-
-  // Initialize conversation capture using iframe message listening
-  const initializeConversationCapture = (conversationUrl: string, conversationId: string) => {
-    try {
-      console.log('🎯 Initializing conversation capture for:', conversationId);
-      
-      // Listen for messages from the Tavus iframe
-      const handleMessage = (event: MessageEvent) => {
-        // Only accept messages from trusted domains
-        if (!event.origin.includes('tavus') && !event.origin.includes('daily') && !event.origin.includes('whereby')) {
-          return;
-        }
-        
-        console.log('📝 Received conversation message:', event.data);
-        
-        // Capture different types of conversation events
-        if (event.data && typeof event.data === 'object') {
-          let conversationEvent;
-          
-          // Handle different message types
-          if (event.data.type === 'transcript' || event.data.action === 'transcript') {
-            conversationEvent = {
-              timestamp: new Date().toISOString(),
-              type: 'transcript',
-              content: event.data.text || event.data.content || event.data.transcript,
-              participant: event.data.speaker || event.data.participant || 'unknown',
-              sessionId: conversationId,
-              rawData: event.data
-            };
-          } else if (event.data.type === 'message' || event.data.action === 'message') {
-            conversationEvent = {
-              timestamp: new Date().toISOString(),
-              type: 'message',
-              content: event.data.text || event.data.content || event.data.message,
-              participant: event.data.from || event.data.participant || 'unknown',
-              sessionId: conversationId,
-              rawData: event.data
-            };
-          } else if (event.data.text || event.data.content || event.data.transcript) {
-            // Direct text content
-            conversationEvent = {
-              timestamp: new Date().toISOString(),
-              type: 'conversation',
-              content: event.data.text || event.data.content || event.data.transcript,
-              participant: event.data.participant || event.data.from || event.data.speaker || 'unknown',
-              sessionId: conversationId,
-              rawData: event.data
-            };
-          }
-          
-          if (conversationEvent) {
-            conversationTranscriptRef.current.push(conversationEvent);
-            
-            // Store in localStorage for persistence
-            const existingTranscript = JSON.parse(localStorage.getItem(`transcript_${conversationId}`) || '[]');
-            existingTranscript.push(conversationEvent);
-            localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(existingTranscript));
-            
-            console.log('💾 Conversation event stored:', conversationEvent);
-          }
-        }
-      };
-      
-      window.addEventListener('message', handleMessage);
-      
-      // Store the cleanup function
-      (window as any).conversationCleanup = () => {
-        window.removeEventListener('message', handleMessage);
-      };
-      
-      console.log('✅ Conversation capture initialized');
       
     } catch (error) {
-      console.error('Error initializing conversation capture:', error);
+      console.error('Error initializing Daily.js:', error);
     }
   };
 
-  // Enhanced function to create and download recording with proper MP4 conversion
-  const triggerDownload = async () => {
-    console.log('Triggering download...');
-    
-    if (recordedChunksRef.current.length === 0) {
-      console.log('No recorded data to download');
-      setError('No recording data available. Please ensure recording was active.');
-      return;
-    }
-
+  // Setup Daily call for recording and transcript capture
+  const setupDailyCall = (conversationUrl: string, conversationId: string) => {
     try {
-      // Stop recording if still active and wait for final data
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        console.log('Stopping active recording...');
-        mediaRecorderRef.current.stop();
-        // Wait for final data to be processed
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-
-      const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
-      console.log('Creating download with', recordedChunksRef.current.length, 'chunks, total size:', totalSize, 'bytes');
+      const Daily = (window as any).DailyIframe;
       
-      if (totalSize === 0) {
-        console.error('Recording is empty');
-        setError('Recording is empty. Please try recording again.');
-        return;
-      }
-
-      // Create blob from recorded chunks
-      const webmBlob = new Blob(recordedChunksRef.current, { 
-        type: 'video/webm' 
+      // Create Daily call frame (hidden, just for API access)
+      const callFrame = Daily.createFrame({
+        showLeaveButton: false,
+        showFullscreenButton: false,
+        showLocalVideo: false,
+        showParticipantsBar: false,
       });
       
-      console.log('Created WebM blob with size:', webmBlob.size, 'bytes');
-
-      // Convert to MP4 for better compatibility
-      const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
-      console.log('Created MP4 blob with size:', mp4Blob.size, 'bytes');
-
-      // Store video in localStorage for immediate viewing (use smaller chunks to avoid quota)
-      try {
-        const reader = new FileReader();
-        reader.onload = () => {
+      dailyCallRef.current = callFrame;
+      
+      // Listen for conversation events
+      callFrame.on('participant-joined', (event: any) => {
+        console.log('👤 Participant joined:', event.participant);
+      });
+      
+      callFrame.on('participant-left', (event: any) => {
+        console.log('👋 Participant left:', event.participant);
+      });
+      
+      // Capture real-time transcript
+      callFrame.on('app-message', (event: any) => {
+        console.log('📝 Received app message:', event);
+        
+        if (event.data && (event.data.type === 'transcript' || event.data.transcript)) {
+          const transcriptEvent = {
+            timestamp: new Date().toISOString(),
+            type: 'transcript',
+            content: event.data.transcript || event.data.text || event.data.content,
+            participant: event.data.participant || event.data.speaker || 'unknown',
+            sessionId: conversationId,
+            rawData: event.data
+          };
+          
+          conversationTranscriptRef.current.push(transcriptEvent);
+          
+          // Store in localStorage for persistence
+          const existingTranscript = JSON.parse(localStorage.getItem(`transcript_${conversationId}`) || '[]');
+          existingTranscript.push(transcriptEvent);
+          localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(existingTranscript));
+          
+          console.log('💾 Real transcript event stored:', transcriptEvent);
+        }
+      });
+      
+      // Join the conversation
+      callFrame.join({ url: conversationUrl }).then(() => {
+        console.log('✅ Joined Daily call for transcript capture');
+        
+        // Start Tavus recording using Daily API
+        setTimeout(() => {
           try {
-            const base64Data = reader.result as string;
-            
-            // Check if data is too large for localStorage
-            if (base64Data.length > 5000000) { // 5MB limit
-              console.warn('⚠️ Recording too large for localStorage, storing metadata only');
-              localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
-                size: mp4Blob.size,
-                type: mp4Blob.type,
-                duration: sessionDuration,
-                timestamp: new Date().toISOString(),
-                format: 'mp4',
-                status: 'too_large_for_storage'
-              }));
-            } else {
-              localStorage.setItem(`recording_${conversationId}`, base64Data);
-              localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
-                size: mp4Blob.size,
-                type: mp4Blob.type,
-                duration: sessionDuration,
-                timestamp: new Date().toISOString(),
-                format: 'mp4',
-                status: 'stored'
-              }));
-              console.log('📹 MP4 recording stored in localStorage');
-            }
-          } catch (storageError) {
-            console.error('❌ Error storing in localStorage:', storageError);
-            // Continue with download even if storage fails
+            callFrame.startRecording({ 
+              recordingType: 'cloud',
+              layout: {
+                preset: 'default'
+              }
+            });
+            console.log('🎬 Started Tavus cloud recording');
+            setRecordingSize(1); // Indicate recording started
+          } catch (recordError) {
+            console.warn('⚠️ Could not start cloud recording:', recordError);
           }
-        };
-        reader.readAsDataURL(mp4Blob);
-      } catch (readerError) {
-        console.error('❌ Error reading blob:', readerError);
-      }
-
-      // Create download link for MP4
-      const url = URL.createObjectURL(mp4Blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `interview-recording-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.mp4`;
-      
-      document.body.appendChild(a);
-      a.click();
-      
-      // Cleanup
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
-      
-      // Also download transcript
-      downloadTranscript();
-      
-      console.log('Download triggered successfully');
+        }, 2000);
+        
+      }).catch((error: any) => {
+        console.error('❌ Failed to join Daily call:', error);
+      });
       
     } catch (error) {
-      console.error('Error triggering download:', error);
-      setError('Failed to download recording. Please try again.');
+      console.error('Error setting up Daily call:', error);
+    }
+  };
+
+  // CRITICAL: Enhanced session cleanup with IMMEDIATE camera/microphone disconnection
+  const handleEndSession = async () => {
+    console.log('🛑 CRITICAL: Ending interview session...');
+    
+    try {
+      // Step 1: IMMEDIATELY stop all media tracks (HIGHEST PRIORITY)
+      console.log('🔴 STEP 1: IMMEDIATELY stopping ALL media tracks...');
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          track.stop();
+          console.log(`✅ Stopped ${track.kind} track (${track.label})`);
+        });
+        streamRef.current = null;
+        
+        // Clear video element immediately
+        if (userVideoRef.current) {
+          userVideoRef.current.srcObject = null;
+        }
+        console.log('✅ ALL MEDIA TRACKS STOPPED IMMEDIATELY');
+      }
+      
+      // Step 2: Stop Daily recording and leave call
+      if (dailyCallRef.current) {
+        try {
+          console.log('🛑 Stopping Tavus recording and leaving Daily call...');
+          await dailyCallRef.current.stopRecording();
+          await dailyCallRef.current.leave();
+          dailyCallRef.current.destroy();
+          dailyCallRef.current = null;
+          console.log('✅ Daily call ended and recording stopped');
+        } catch (dailyError) {
+          console.warn('⚠️ Error ending Daily call:', dailyError);
+        }
+      }
+      
+      // Step 3: Stop local recording if active
+      setIsRecording(false);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+        console.log('Local recording stopped');
+      }
+      
+      // Step 4: Capture final conversation data
+      const finalTranscript = conversationTranscriptRef.current;
+      const finalMetrics = speechMetricsRef.current;
+      
+      // Store final session data
+      const sessionData = {
+        conversationId,
+        transcript: finalTranscript,
+        metrics: finalMetrics,
+        duration: sessionDuration,
+        endTime: new Date().toISOString(),
+        userName,
+        jobTitle: localStorage.getItem('jobTitle'),
+        company: localStorage.getItem('company')
+      };
+      
+      localStorage.setItem(`session_${conversationId}`, JSON.stringify(sessionData));
+      console.log('📊 Final session data stored');
+      
+      // Step 5: Download transcript
+      downloadTranscript();
+      
+      // Step 6: End conversation on backend to stop credit usage and cleanup persona
+      if (conversationId) {
+        try {
+          console.log('Ending conversation and cleaning up persona on backend...');
+          const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              conversationId,
+              dynamicPersonaId // Include persona ID for cleanup
+            }),
+          });
+          
+          if (response.ok) {
+            console.log('✅ Conversation and persona cleanup completed successfully');
+          } else {
+            console.warn('⚠️ Failed to end conversation on backend, but continuing...');
+          }
+        } catch (endError) {
+          console.warn('⚠️ Error ending conversation on backend:', endError);
+          // Continue anyway since camera is already disconnected
+        }
+      }
+      
+      // Step 7: Store session completion data
+      localStorage.setItem('sessionCompleted', 'true');
+      localStorage.setItem('sessionEndTime', new Date().toISOString());
+      localStorage.setItem('sessionDuration', sessionDuration.toString());
+      
+      // Step 8: Navigate to feedback page
+      console.log('Navigating to feedback page...');
+      navigate('/feedback/1');
+      
+    } catch (error) {
+      console.error('Error during session cleanup:', error);
+      setError('Error ending session. Camera and microphone have been disconnected.');
+      
+      // Ensure camera is disconnected even if there's an error
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+        if (userVideoRef.current) {
+          userVideoRef.current.srcObject = null;
+        }
+      }
     }
   };
 
@@ -425,6 +315,12 @@ const Interview = () => {
   const downloadTranscript = () => {
     try {
       const transcript = conversationTranscriptRef.current;
+      
+      if (transcript.length === 0) {
+        console.warn('No transcript data to download');
+        return;
+      }
+      
       const formattedTranscript = transcript.map(event => 
         `[${event.timestamp}] ${event.participant}: ${event.content}`
       ).join('\n\n');
@@ -450,126 +346,18 @@ const Interview = () => {
     }
   };
 
-  // CRITICAL: Enhanced session cleanup with IMMEDIATE camera/microphone disconnection
-  const handleEndSession = async () => {
-    console.log('🛑 CRITICAL: Ending interview session...');
-    
-    try {
-      // Step 1: IMMEDIATELY stop all media tracks (HIGHEST PRIORITY)
-      console.log('🔴 STEP 1: IMMEDIATELY stopping ALL media tracks...');
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-          track.stop();
-          console.log(`✅ Stopped ${track.kind} track (${track.label})`);
-        });
-        streamRef.current = null;
-        
-        // Clear video element immediately
-        if (userVideoRef.current) {
-          userVideoRef.current.srcObject = null;
-        }
-        console.log('✅ ALL MEDIA TRACKS STOPPED IMMEDIATELY');
-      }
-      
-      // Step 2: Stop recording
-      setIsRecording(false);
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop();
-        console.log('Recording stopped');
-        // Wait for final data to be processed
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-      
-      // Step 3: Capture final conversation data
-      const finalTranscript = conversationTranscriptRef.current;
-      const finalMetrics = speechMetricsRef.current;
-      
-      // Store final session data
-      const sessionData = {
-        conversationId,
-        transcript: finalTranscript,
-        metrics: finalMetrics,
-        duration: sessionDuration,
-        endTime: new Date().toISOString(),
-        userName,
-        jobTitle: localStorage.getItem('jobTitle'),
-        company: localStorage.getItem('company')
-      };
-      
-      localStorage.setItem(`session_${conversationId}`, JSON.stringify(sessionData));
-      console.log('📊 Final session data stored');
-      
-      // Step 4: Trigger download and store recording
-      await triggerDownload();
-      
-      // Step 5: Cleanup audio analysis
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-        audioAnalyserRef.current = null;
-        console.log('✅ Audio analysis cleaned up');
-      }
-      
-      // Step 6: Cleanup conversation capture
-      if ((window as any).conversationCleanup) {
-        (window as any).conversationCleanup();
-        console.log('✅ Conversation capture cleaned up');
-      }
-      
-      // Step 7: End conversation on backend to stop credit usage and cleanup persona
-      if (conversationId) {
-        try {
-          console.log('Ending conversation and cleaning up persona on backend...');
-          const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              conversationId,
-              dynamicPersonaId // Include persona ID for cleanup
-            }),
-          });
-          
-          if (response.ok) {
-            console.log('✅ Conversation and persona cleanup completed successfully');
-          } else {
-            console.warn('⚠️ Failed to end conversation on backend, but continuing...');
-          }
-        } catch (endError) {
-          console.warn('⚠️ Error ending conversation on backend:', endError);
-          // Continue anyway since camera is already disconnected
-        }
-      }
-      
-      // Step 8: Store session completion data
-      localStorage.setItem('sessionCompleted', 'true');
-      localStorage.setItem('sessionEndTime', new Date().toISOString());
-      localStorage.setItem('sessionDuration', sessionDuration.toString());
-      
-      // Step 9: Navigate to feedback page
-      console.log('Navigating to feedback page...');
-      navigate('/feedback/1');
-      
-    } catch (error) {
-      console.error('Error during session cleanup:', error);
-      setError('Error ending session. Camera and microphone have been disconnected.');
-      
-      // Ensure camera is disconnected even if there's an error
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-        if (userVideoRef.current) {
-          userVideoRef.current.srcObject = null;
-        }
-      }
-    }
-  };
-
   // Handle unexpected tab close with immediate cleanup
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       // Stop all tracks immediately
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      // Stop Daily call
+      if (dailyCallRef.current) {
+        dailyCallRef.current.leave();
+        dailyCallRef.current.destroy();
       }
       
       // Use sendBeacon for reliable cleanup on tab close
@@ -603,11 +391,9 @@ const Interview = () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-      if ((window as any).conversationCleanup) {
-        (window as any).conversationCleanup();
+      if (dailyCallRef.current) {
+        dailyCallRef.current.leave();
+        dailyCallRef.current.destroy();
       }
     };
   }, [conversationId, dynamicPersonaId]);
@@ -657,11 +443,11 @@ const Interview = () => {
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session (Screen Recording)
+                Live Interview Session (Tavus Recording)
               </span>
               {isRecording && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                  Recording • {formatDuration(sessionDuration)} • {formatBytes(recordingSize)}
+                  Recording • {formatDuration(sessionDuration)} • Cloud Recording Active
                 </span>
               )}
             </div>
@@ -699,6 +485,12 @@ const Interview = () => {
                   <p className="text-center text-sm text-light-text-secondary dark:text-dark-text-secondary">
                     Your AI interviewer Sarah is conducting a personalized interview with {userName}
                   </p>
+                  <div className="text-center">
+                    <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                      <span>Tavus Cloud Recording Active</span>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
@@ -733,23 +525,14 @@ const Interview = () => {
                   <div className="absolute top-2 right-2">
                     <div className="flex items-center space-x-2 bg-red-500 text-white px-2 py-1 rounded-full text-xs">
                       <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                      <span>SCREEN REC</span>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Recording size indicator */}
-                {recordingSize > 0 && (
-                  <div className="absolute bottom-2 left-2">
-                    <div className="bg-black/50 text-white px-2 py-1 rounded text-xs">
-                      {formatBytes(recordingSize)}
+                      <span>LIVE</span>
                     </div>
                   </div>
                 )}
               </div>
               
               <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
-                Recording your entire screen + audio for complete interview capture
+                Your camera preview - Tavus is recording the complete interview
               </p>
             </div>
 
@@ -760,12 +543,12 @@ const Interview = () => {
               </h3>
               <div className="space-y-3">
                 <button 
-                  onClick={triggerDownload}
-                  disabled={recordingSize === 0}
+                  onClick={downloadTranscript}
+                  disabled={conversationTranscriptRef.current.length === 0}
                   className="w-full flex items-center justify-center px-4 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  Download Recording (MP4) + Transcript
+                  Download Real Transcript
                 </button>
               </div>
             </div>
@@ -779,7 +562,7 @@ const Interview = () => {
                 <div className="flex justify-between">
                   <span className="text-light-text-secondary dark:text-dark-text-secondary">Status:</span>
                   <span className="text-green-500 font-medium">
-                    {isRecording ? 'Recording Screen' : 'Ready'}
+                    {isRecording ? 'Live Interview' : 'Ready'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -789,33 +572,27 @@ const Interview = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording Size:</span>
-                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
-                    {formatBytes(recordingSize)}
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
+                  <span className="text-green-500 font-medium">
+                    Tavus Cloud
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Chunks:</span>
-                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
-                    {recordedChunksRef.current.length}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera/Screen:</span>
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera/Mic:</span>
                   <span className={`font-medium ${streamRef.current ? 'text-green-500' : 'text-red-500'}`}>
                     {streamRef.current ? 'Active' : 'Disconnected'}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Transcript:</span>
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Transcript Events:</span>
                   <span className="text-blue-500 font-medium">
-                    {conversationTranscriptRef.current.length} events
+                    {conversationTranscriptRef.current.length}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Audio Level:</span>
-                  <span className="text-yellow-500 font-medium">
-                    {speechMetricsRef.current.speaking ? 'Speaking' : 'Silent'}
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Daily Call:</span>
+                  <span className={`font-medium ${dailyCallRef.current ? 'text-green-500' : 'text-gray-500'}`}>
+                    {dailyCallRef.current ? 'Connected' : 'Disconnected'}
                   </span>
                 </div>
                 {dynamicPersonaId && (

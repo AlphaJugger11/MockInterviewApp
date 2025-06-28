@@ -108,6 +108,11 @@ const Feedback = () => {
           setAnalysisData(data.analysis);
           console.log('✅ Analysis data source:', data.dataSource);
           console.log('📊 Analysis data:', data.analysis);
+          
+          // Show data source indicator
+          if (data.dataSource === 'real_conversation') {
+            console.log('🎯 Analysis based on REAL conversation data!');
+          }
         } else {
           throw new Error('Failed to fetch analysis');
         }
@@ -173,24 +178,47 @@ const Feedback = () => {
       }
     };
 
-    // Load stored recording if available
-    const loadStoredRecording = () => {
+    // Load Tavus recording if available
+    const loadTavusRecording = async () => {
+      if (sessionData.conversationId) {
+        try {
+          // Try to get recording URL from Tavus API
+          const response = await fetch(`http://localhost:3001/api/interview/get-recording/${sessionData.conversationId}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.recording_url) {
+              setRecordingUrl(data.recording_url);
+              setRecordingMetadata({
+                format: 'mp4',
+                source: 'tavus_cloud',
+                size: 'Unknown',
+                status: 'available'
+              });
+              console.log('✅ Loaded Tavus cloud recording:', data.recording_url);
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not load Tavus recording:', error);
+        }
+      }
+      
+      // Fallback: Check localStorage for local recording
       const storedRecording = localStorage.getItem(`recording_${sessionData.conversationId}`);
       const storedMetadata = localStorage.getItem(`recording_${sessionData.conversationId}_metadata`);
       
-      if (storedRecording) {
+      if (storedRecording && !recordingUrl) {
         setRecordingUrl(storedRecording);
-        console.log('✅ Loaded stored recording from localStorage');
+        console.log('✅ Loaded local recording from localStorage');
       }
       
-      if (storedMetadata) {
+      if (storedMetadata && !recordingMetadata) {
         setRecordingMetadata(JSON.parse(storedMetadata));
         console.log('✅ Loaded recording metadata:', JSON.parse(storedMetadata));
       }
     };
 
     fetchAnalysis();
-    loadStoredRecording();
+    loadTavusRecording();
   }, [id, sessionData.role, sessionData.userName, sessionData.conversationId]);
 
   const renderCircularProgress = (value: number, size: 'small' | 'large' = 'large') => {
@@ -234,10 +262,16 @@ const Feedback = () => {
 
   const downloadRecording = () => {
     if (recordingUrl) {
-      const link = document.createElement('a');
-      link.href = recordingUrl;
-      link.download = `interview-recording-${sessionData.conversationId}.mp4`;
-      link.click();
+      if (recordingUrl.startsWith('data:')) {
+        // Local recording - trigger download
+        const link = document.createElement('a');
+        link.href = recordingUrl;
+        link.download = `interview-recording-${sessionData.conversationId}.mp4`;
+        link.click();
+      } else {
+        // External URL - open in new tab
+        window.open(recordingUrl, '_blank');
+      }
     }
   };
 
@@ -305,13 +339,13 @@ const Feedback = () => {
                       {recordingMetadata?.status === 'too_large_for_storage' 
                         ? 'Recording too large for browser storage - check downloads' 
                         : sessionData.sessionCompleted 
-                          ? 'Recording completed and stored locally' 
+                          ? 'Recording completed and stored' 
                           : 'Recording in progress'
                       }
                     </p>
                     {recordingMetadata && (
                       <p className="text-white/40 text-xs mt-1">
-                        Size: {Math.round(recordingMetadata.size / 1024 / 1024)}MB • Format: {recordingMetadata.format}
+                        Source: {recordingMetadata.source || 'Local'} • Format: {recordingMetadata.format || 'mp4'}
                       </p>
                     )}
                   </div>
@@ -325,7 +359,7 @@ const Feedback = () => {
                   className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  Download Recording
+                  {recordingUrl?.startsWith('http') ? 'View Recording' : 'Download Recording'}
                 </button>
                 
                 <button 
@@ -354,7 +388,7 @@ const Feedback = () => {
               {analysisData.dataSource === 'real_conversation' && (
                 <div className="mb-4 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
                   <p className="text-green-600 dark:text-green-400 text-sm font-medium">
-                    ✅ This analysis is based on your actual conversation transcript and real-time metrics
+                    ✅ This analysis is based on your actual conversation transcript and real-time metrics from Tavus
                   </p>
                 </div>
               )}
@@ -384,6 +418,11 @@ const Feedback = () => {
                     <span className="text-2xl font-bold text-light-text-primary dark:text-dark-text-primary">
                       {question.score}%
                     </span>
+                    {analysisData.dataSource === 'real_conversation' && (
+                      <span className="text-xs bg-green-500/10 text-green-600 dark:text-green-400 px-2 py-1 rounded-full">
+                        Real Data
+                      </span>
+                    )}
                   </div>
                 </div>
                 
