@@ -118,7 +118,9 @@ const Feedback = () => {
             console.log('🎯 Analysis based on REAL conversation data!');
           }
         } else {
-          throw new Error('Failed to fetch analysis');
+          const errorData = await response.json();
+          console.error('❌ Analysis API error:', errorData);
+          throw new Error(errorData.error || 'Failed to fetch analysis');
         }
       } catch (err) {
         console.error('Error fetching analysis:', err);
@@ -258,6 +260,7 @@ const Feedback = () => {
       }
     } else {
       console.warn('⚠️ No recording URL available');
+      alert('No recording available. The session may not have been recorded properly.');
     }
   };
 
@@ -374,8 +377,7 @@ TRANSCRIPT:
               <div className="flex space-x-4">
                 <button 
                   onClick={downloadRecording}
-                  disabled={!recordingUrl}
-                  className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity"
                 >
                   <Download className="h-4 w-4 mr-2" />
                   {recordingUrl?.startsWith('http') ? 'View Recording' : 'Download Recording'}

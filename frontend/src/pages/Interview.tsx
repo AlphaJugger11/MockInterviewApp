@@ -19,10 +19,12 @@ const Interview = () => {
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [screenSharingRequested, setScreenSharingRequested] = useState(false);
   const [recordingInitialized, setRecordingInitialized] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
 
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const endingInProgressRef = useRef<boolean>(false);
 
   useEffect(() => {
     // Get the conversation data from localStorage
@@ -48,7 +50,7 @@ const Interview = () => {
 
     // Session duration timer
     const timer = setInterval(() => {
-      if (!isEnding) {
+      if (!isEnding && !sessionEnded) {
         setSessionDuration(Math.floor((Date.now() - sessionStartTimeRef.current) / 1000));
       }
     }, 1000);
@@ -57,13 +59,13 @@ const Interview = () => {
     return () => {
       clearInterval(timer);
     };
-  }, [navigate, isEnding]);
+  }, [navigate, isEnding, sessionEnded]);
 
   // Browser-based recording with proper state management
   useEffect(() => {
     const startBrowserRecording = async () => {
-      // Prevent multiple screen sharing requests
-      if (screenSharingRequested || recordingInitialized || !conversationId) {
+      // Prevent multiple screen sharing requests and don't start if session is ending
+      if (screenSharingRequested || recordingInitialized || !conversationId || isEnding || sessionEnded) {
         return;
       }
 
@@ -174,8 +176,8 @@ const Interview = () => {
       }
     };
     
-    // Only start recording once when conversation is ready
-    if (conversationId && isRecording && !screenSharingRequested && !recordingInitialized) {
+    // Only start recording once when conversation is ready and not ending
+    if (conversationId && isRecording && !screenSharingRequested && !recordingInitialized && !isEnding && !sessionEnded) {
       // Add a small delay to ensure the page is fully loaded
       const timeout = setTimeout(() => {
         startBrowserRecording();
@@ -183,17 +185,19 @@ const Interview = () => {
       
       return () => clearTimeout(timeout);
     }
-  }, [conversationId, isRecording, screenSharingRequested, recordingInitialized, sessionDuration]);
+  }, [conversationId, isRecording, screenSharingRequested, recordingInitialized, sessionDuration, isEnding, sessionEnded]);
 
   // CRITICAL: Enhanced session cleanup with REAL transcript and recording capture
   const handleEndSession = async () => {
-    if (isEnding) return; // Prevent multiple calls
+    if (isEnding || endingInProgressRef.current || sessionEnded) return; // Prevent multiple calls
     
     console.log('🛑 CRITICAL: Ending interview session...');
     setIsEnding(true);
+    setSessionEnded(true);
+    endingInProgressRef.current = true;
     
     try {
-      // Step 1: Stop browser recording first
+      // Step 1: Stop browser recording first (NO NEW SCREEN SHARING REQUESTS)
       if (mediaRecorder && mediaRecorder.state === 'recording') {
         console.log('🛑 Stopping browser recording...');
         mediaRecorder.stop();
@@ -297,10 +301,13 @@ const Interview = () => {
         console.warn('⚠️ No real transcript available for download');
       }
       
-      // Step 5: End conversation on backend to stop Tavus session
+      // Step 5: End conversation on backend with better error handling
       if (conversationId) {
         try {
           console.log('🛑 Ending conversation on backend...');
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+          
           const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -308,7 +315,10 @@ const Interview = () => {
               conversationId,
               dynamicPersonaId
             }),
+            signal: controller.signal
           });
+          
+          clearTimeout(timeoutId);
           
           if (response.ok) {
             const endData = await response.json();
@@ -319,10 +329,11 @@ const Interview = () => {
               console.log('📝 Backend returned additional transcript data');
             }
           } else {
-            console.warn('⚠️ Failed to end conversation on backend');
+            console.warn('⚠️ Failed to end conversation on backend, but continuing...');
           }
         } catch (endError) {
-          console.warn('⚠️ Error ending conversation on backend:', endError);
+          console.warn('⚠️ Error ending conversation on backend (continuing anyway):', endError);
+          // Don't block navigation if backend cleanup fails
         }
       }
       
@@ -339,6 +350,8 @@ const Interview = () => {
       console.error('❌ Error during session cleanup:', error);
       setError('Error ending session. Please try again.');
       setIsEnding(false);
+      setSessionEnded(false);
+      endingInProgressRef.current = false;
     }
   };
 
@@ -404,7 +417,7 @@ TRANSCRIPT:
       }
       
       // Use sendBeacon for reliable cleanup on tab close
-      if (conversationId && !isEnding) {
+      if (conversationId && !isEnding && !sessionEnded) {
         const data = JSON.stringify({ 
           conversationId,
           dynamicPersonaId 
@@ -421,7 +434,7 @@ TRANSCRIPT:
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [conversationId, dynamicPersonaId, isEnding, mediaRecorder]);
+  }, [conversationId, dynamicPersonaId, isEnding, mediaRecorder, sessionEnded]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -462,7 +475,7 @@ TRANSCRIPT:
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
                 Live Interview Session - Tavus Recording
               </span>
-              {isRecording && !isEnding && (
+              {isRecording && !isEnding && !sessionEnded && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
                   Recording • {formatDuration(sessionDuration)} • 
                   {recordingInitialized ? ' Screen + Cloud Recording' : ' Cloud Recording Only'}
@@ -471,7 +484,7 @@ TRANSCRIPT:
             </div>
             <button
               onClick={handleEndSession}
-              disabled={isEnding}
+              disabled={isEnding || sessionEnded}
               className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Square className="h-4 w-4 mr-2" />
@@ -514,7 +527,7 @@ TRANSCRIPT:
                       <span>Screen Recording Active</span>
                     </div>
                   )}
-                  {screenSharingRequested && !recordingInitialized && (
+                  {screenSharingRequested && !recordingInitialized && !isEnding && !sessionEnded && (
                     <div className="inline-flex items-center space-x-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 px-3 py-1 rounded-full text-sm">
                       <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
                       <span>Screen Sharing Requested</span>
@@ -541,8 +554,8 @@ TRANSCRIPT:
           <div className="grid md:grid-cols-3 gap-4 text-sm">
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Status:</span>
-              <span className={`font-medium ${isEnding ? 'text-orange-500' : 'text-green-500'}`}>
-                {isEnding ? 'Ending Session...' : isRecording ? 'Live Interview' : 'Ready'}
+              <span className={`font-medium ${isEnding || sessionEnded ? 'text-orange-500' : 'text-green-500'}`}>
+                {isEnding || sessionEnded ? 'Ending Session...' : isRecording ? 'Live Interview' : 'Ready'}
               </span>
             </div>
             <div className="flex justify-between">
@@ -587,10 +600,10 @@ TRANSCRIPT:
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Screen Share:</span>
               <span className={`font-medium text-xs ${
                 recordingInitialized ? 'text-green-500' : 
-                screenSharingRequested ? 'text-yellow-500' : 'text-gray-500'
+                screenSharingRequested && !isEnding && !sessionEnded ? 'text-yellow-500' : 'text-gray-500'
               }`}>
                 {recordingInitialized ? 'Active' : 
-                 screenSharingRequested ? 'Requested' : 'Not Started'}
+                 screenSharingRequested && !isEnding && !sessionEnded ? 'Requested' : 'Not Started'}
               </span>
             </div>
           </div>
@@ -606,7 +619,7 @@ TRANSCRIPT:
               <li>• Real-time transcript captured during conversation</li>
               <li>• Both recording and transcript available for download when session ends</li>
               <li>• Analysis based on actual conversation content</li>
-              {!recordingInitialized && !screenSharingRequested && (
+              {!recordingInitialized && !screenSharingRequested && !isEnding && !sessionEnded && (
                 <li className="text-yellow-600 dark:text-yellow-400">• Screen recording will be requested after page loads</li>
               )}
             </ul>

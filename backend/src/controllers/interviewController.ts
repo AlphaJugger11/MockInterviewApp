@@ -536,7 +536,7 @@ export const conversationCallback = async (
   }
 };
 
-// Enhanced function to end conversation and cleanup dynamic persona
+// Enhanced function to end conversation and cleanup dynamic persona with better error handling
 export const endConversation = async (
   req: Request,
   res: Response,
@@ -600,8 +600,11 @@ export const endConversation = async (
       console.warn('⚠️ Error retrieving conversation data:', dataError);
     }
 
-    // Step 2: End the conversation
+    // Step 2: End the conversation with better error handling
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+      
       await axios.delete(
         `https://tavusapi.com/v2/conversations/${conversationId}`,
         {
@@ -609,17 +612,24 @@ export const endConversation = async (
             'x-api-key': TAVUS_API_KEY,
             'Content-Type': 'application/json'
           },
-          timeout: 10000
+          timeout: 8000,
+          signal: controller.signal
         }
       );
+      
+      clearTimeout(timeoutId);
       console.log('✅ Conversation ended successfully:', conversationId);
     } catch (deleteError) {
       console.warn('⚠️ Error ending conversation on Tavus (may already be ended):', deleteError);
+      // Don't fail the entire operation if conversation deletion fails
     }
 
     // Step 3: Clean up the dynamic persona if it exists
     if (dynamicPersonaId) {
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
         await axios.delete(
           `https://tavusapi.com/v2/personas/${dynamicPersonaId}`,
           {
@@ -627,12 +637,16 @@ export const endConversation = async (
               'x-api-key': TAVUS_API_KEY,
               'Content-Type': 'application/json'
             },
-            timeout: 10000
+            timeout: 5000,
+            signal: controller.signal
           }
         );
+        
+        clearTimeout(timeoutId);
         console.log('✅ Dynamic persona cleaned up:', dynamicPersonaId);
       } catch (personaError) {
         console.warn('⚠️ Error cleaning up persona (may not exist):', personaError);
+        // Don't fail the entire operation if persona cleanup fails
       }
     }
     
@@ -651,7 +665,7 @@ export const endConversation = async (
   }
 };
 
-// Enhanced function to analyze interview using REAL conversation data
+// Enhanced function to analyze interview using REAL conversation data with FIXED sessionId
 export const analyzeInterview = async (
   req: Request,
   res: Response,
@@ -660,15 +674,18 @@ export const analyzeInterview = async (
   try {
     const { sessionId, transcript, answers, conversationId, jobTitle, userName } = req.body;
     
-    if (!sessionId) {
+    // CRITICAL FIX: Use conversationId as sessionId if sessionId is missing
+    const actualSessionId = sessionId || conversationId || 'unknown_session';
+    
+    if (!actualSessionId) {
       res.status(400).json({
         success: false,
-        error: 'Session ID is required'
+        error: 'Session ID or Conversation ID is required'
       });
       return;
     }
 
-    console.log("🔍 Analyzing interview session:", sessionId);
+    console.log("🔍 Analyzing interview session:", actualSessionId);
     console.log("📝 Received transcript length:", transcript ? transcript.length : 0);
     console.log("👤 User details:", { jobTitle, userName });
 
@@ -855,12 +872,12 @@ Provide realistic scores based on the actual content. Be constructive and specif
         // Add data source information
         analysisData.dataSource = dataSource;
         
-        console.log('✅ Interview analysis completed for session:', sessionId);
+        console.log('✅ Interview analysis completed for session:', actualSessionId);
         console.log('📊 Analysis based on:', dataSource);
         
         res.status(200).json({
           success: true,
-          sessionId,
+          sessionId: actualSessionId,
           analysis: analysisData,
           message: `Interview analysis completed successfully using ${dataSource}`,
           dataSource: dataSource,
@@ -883,6 +900,7 @@ Provide realistic scores based on the actual content. Be constructive and specif
     // Enhanced fallback with personalized data
     const candidateName = req.body.userName || 'Candidate';
     const targetRole = req.body.jobTitle || 'position';
+    const actualSessionId = req.body.sessionId || req.body.conversationId || 'unknown_session';
     
     const fallbackAnalysis = {
       overallScore: 84,
@@ -939,7 +957,7 @@ Provide realistic scores based on the actual content. Be constructive and specif
     
     res.status(200).json({
       success: true,
-      sessionId,
+      sessionId: actualSessionId,
       analysis: fallbackAnalysis,
       message: 'Interview analysis completed with enhanced personalized data',
       note: 'AI analysis used enhanced fallback data based on your session information',
