@@ -11,19 +11,11 @@ const Interview = () => {
   const [error, setError] = useState<string | null>(null);
   const [sessionDuration, setSessionDuration] = useState(0);
   const [userName, setUserName] = useState<string>('');
-  const [recordingSize, setRecordingSize] = useState(0);
+  const [isEnding, setIsEnding] = useState(false);
 
-  // Recording refs and state
-  const userVideoRef = useRef<HTMLVideoElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
+  // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
-
-  // Real conversation capture using Daily.js
   const conversationTranscriptRef = useRef<any[]>([]);
-  const speechMetricsRef = useRef<any>({});
-  const dailyCallRef = useRef<any>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
@@ -38,299 +30,152 @@ const Interview = () => {
       setConversationId(id);
       setDynamicPersonaId(personaId);
       setUserName(name);
-      console.log('Loaded conversation:', { url, id, personaId, name });
+      setIsRecording(true);
+      sessionStartTimeRef.current = Date.now();
+      console.log('✅ Interview session started:', { url, id, personaId, name });
     } else {
-      console.error("No conversation data found. Navigating back to setup.");
+      console.error("❌ No conversation data found. Navigating back to setup.");
       setError("No interview session found. Please set up a new interview.");
       setTimeout(() => navigate('/setup'), 3000);
       return;
     }
 
-    // Initialize user media and recording
-    const initializeMedia = async () => {
-      try {
-        // Get user camera and microphone for local preview
-        const userStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            width: { ideal: 640 }, 
-            height: { ideal: 480 },
-            frameRate: { ideal: 30 }
-          }, 
-          audio: { 
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: 48000,
-            channelCount: 2
-          } 
-        });
-        
-        streamRef.current = userStream;
-        
-        if (userVideoRef.current) {
-          userVideoRef.current.srcObject = userStream; // Show user camera in preview
-        }
-
-        // Initialize Daily.js for conversation capture and recording
-        if (url) {
-          initializeDailyCapture(url, id!);
-        }
-
-        setIsRecording(true);
-        sessionStartTimeRef.current = Date.now();
-        console.log('✅ Media initialized successfully');
-
-      } catch (err) {
-        console.error("Failed to get user media:", err);
-        setError("Failed to access camera and microphone. Please check your permissions and try again.");
-      }
-    };
-
-    initializeMedia();
-
     // Session duration timer
     const timer = setInterval(() => {
-      setSessionDuration(Math.floor((Date.now() - sessionStartTimeRef.current) / 1000));
+      if (!isEnding) {
+        setSessionDuration(Math.floor((Date.now() - sessionStartTimeRef.current) / 1000));
+      }
     }, 1000);
 
     // Cleanup function
     return () => {
       clearInterval(timer);
     };
-  }, [navigate]);
+  }, [navigate, isEnding]);
 
-  // Initialize Daily.js for real conversation capture and recording
-  const initializeDailyCapture = async (conversationUrl: string, conversationId: string) => {
-    try {
-      console.log('🎯 Initializing Daily.js for conversation capture and recording...');
-      
-      // Load Daily.js if not already loaded
-      if (!(window as any).DailyIframe) {
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/@daily-co/daily-js';
-        script.onload = () => {
-          setupDailyCall(conversationUrl, conversationId);
-        };
-        document.head.appendChild(script);
-      } else {
-        setupDailyCall(conversationUrl, conversationId);
-      }
-      
-    } catch (error) {
-      console.error('Error initializing Daily.js:', error);
-    }
-  };
-
-  // Setup Daily call for recording and transcript capture
-  const setupDailyCall = (conversationUrl: string, conversationId: string) => {
-    try {
-      const Daily = (window as any).DailyIframe;
-      
-      // Create Daily call frame (hidden, just for API access)
-      const callFrame = Daily.createFrame({
-        showLeaveButton: false,
-        showFullscreenButton: false,
-        showLocalVideo: false,
-        showParticipantsBar: false,
-      });
-      
-      dailyCallRef.current = callFrame;
-      
-      // Listen for conversation events
-      callFrame.on('participant-joined', (event: any) => {
-        console.log('👤 Participant joined:', event.participant);
-      });
-      
-      callFrame.on('participant-left', (event: any) => {
-        console.log('👋 Participant left:', event.participant);
-      });
-      
-      // Capture real-time transcript
-      callFrame.on('app-message', (event: any) => {
-        console.log('📝 Received app message:', event);
-        
-        if (event.data && (event.data.type === 'transcript' || event.data.transcript)) {
-          const transcriptEvent = {
-            timestamp: new Date().toISOString(),
-            type: 'transcript',
-            content: event.data.transcript || event.data.text || event.data.content,
-            participant: event.data.participant || event.data.speaker || 'unknown',
-            sessionId: conversationId,
-            rawData: event.data
-          };
-          
-          conversationTranscriptRef.current.push(transcriptEvent);
-          
-          // Store in localStorage for persistence
-          const existingTranscript = JSON.parse(localStorage.getItem(`transcript_${conversationId}`) || '[]');
-          existingTranscript.push(transcriptEvent);
-          localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(existingTranscript));
-          
-          console.log('💾 Real transcript event stored:', transcriptEvent);
-        }
-      });
-      
-      // Join the conversation
-      callFrame.join({ url: conversationUrl }).then(() => {
-        console.log('✅ Joined Daily call for transcript capture');
-        
-        // Start Daily.js recording using cloud recording
-        setTimeout(() => {
-          try {
-            callFrame.startRecording({ 
-              recordingType: 'cloud',
-              layout: {
-                preset: 'default'
-              }
-            });
-            console.log('🎬 Started Daily.js cloud recording');
-            setRecordingSize(1); // Indicate recording started
-          } catch (recordError) {
-            console.warn('⚠️ Could not start cloud recording:', recordError);
-          }
-        }, 2000);
-        
-      }).catch((error: any) => {
-        console.error('❌ Failed to join Daily call:', error);
-      });
-      
-    } catch (error) {
-      console.error('Error setting up Daily call:', error);
-    }
-  };
-
-  // CRITICAL: Enhanced session cleanup with IMMEDIATE camera/microphone disconnection
+  // CRITICAL: Enhanced session cleanup with IMMEDIATE disconnection
   const handleEndSession = async () => {
+    if (isEnding) return; // Prevent multiple calls
+    
     console.log('🛑 CRITICAL: Ending interview session...');
+    setIsEnding(true);
     
     try {
-      // Step 1: IMMEDIATELY stop all media tracks (HIGHEST PRIORITY)
-      console.log('🔴 STEP 1: IMMEDIATELY stopping ALL media tracks...');
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-          track.stop();
-          console.log(`✅ Stopped ${track.kind} track (${track.label})`);
-        });
-        streamRef.current = null;
-        
-        // Clear video element immediately
-        if (userVideoRef.current) {
-          userVideoRef.current.srcObject = null;
-        }
-        console.log('✅ ALL MEDIA TRACKS STOPPED IMMEDIATELY');
-      }
+      // Step 1: Capture conversation data from Tavus iframe
+      console.log('📊 Capturing conversation data...');
+      let realTranscript: any[] = [];
+      let conversationData: any = {};
       
-      // Step 2: Stop Daily recording and leave call
-      if (dailyCallRef.current) {
+      // Try to get conversation data from Tavus API
+      if (conversationId) {
         try {
-          console.log('🛑 Stopping Daily.js recording and leaving call...');
-          await dailyCallRef.current.stopRecording();
-          await dailyCallRef.current.leave();
-          dailyCallRef.current.destroy();
-          dailyCallRef.current = null;
-          console.log('✅ Daily call ended and recording stopped');
-        } catch (dailyError) {
-          console.warn('⚠️ Error ending Daily call:', dailyError);
+          console.log('🔍 Fetching REAL conversation data from Tavus API...');
+          const response = await fetch(`http://localhost:3001/api/interview/get-conversation/${conversationId}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (response.ok) {
+            conversationData = await response.json();
+            console.log('✅ Retrieved real conversation data:', conversationData);
+            
+            // Extract transcript from conversation data
+            if (conversationData.transcript) {
+              realTranscript = conversationData.transcript.split('\n').map((line: string, index: number) => ({
+                timestamp: new Date().toISOString(),
+                type: 'conversation',
+                content: line.trim(),
+                participant: line.includes('Sarah') || line.includes('Interviewer') ? 'ai' : 'user',
+                sessionId: conversationId,
+                index
+              })).filter((item: any) => item.content.length > 0);
+              
+              console.log('📝 Extracted real transcript:', realTranscript.length, 'events');
+            }
+          }
+        } catch (apiError) {
+          console.warn('⚠️ Could not retrieve conversation data from API:', apiError);
         }
       }
       
-      // Step 3: Stop local recording if active
-      setIsRecording(false);
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop();
-        console.log('Local recording stopped');
-      }
-      
-      // Step 4: Capture final conversation data
-      const finalTranscript = conversationTranscriptRef.current;
-      const finalMetrics = speechMetricsRef.current;
-      
-      // Store final session data
-      const sessionData = {
+      // Step 2: Store final session data with REAL transcript
+      const finalSessionData = {
         conversationId,
-        transcript: finalTranscript,
-        metrics: finalMetrics,
+        transcript: realTranscript,
         duration: sessionDuration,
         endTime: new Date().toISOString(),
         userName,
         jobTitle: localStorage.getItem('jobTitle'),
-        company: localStorage.getItem('company')
+        company: localStorage.getItem('company'),
+        conversationData: conversationData
       };
       
-      localStorage.setItem(`session_${conversationId}`, JSON.stringify(sessionData));
-      console.log('📊 Final session data stored');
+      localStorage.setItem(`session_${conversationId}`, JSON.stringify(finalSessionData));
+      localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(realTranscript));
+      console.log('💾 Final session data stored with real transcript');
       
-      // Step 5: Download transcript
-      downloadTranscript();
+      // Step 3: Download REAL transcript immediately
+      downloadRealTranscript(realTranscript);
       
-      // Step 6: End conversation on backend to stop credit usage and cleanup persona
+      // Step 4: End conversation on backend to stop Tavus session
       if (conversationId) {
         try {
-          console.log('Ending conversation and cleaning up persona on backend...');
+          console.log('🛑 Ending conversation on backend...');
           const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               conversationId,
-              dynamicPersonaId // Include persona ID for cleanup
+              dynamicPersonaId
             }),
           });
           
           if (response.ok) {
-            console.log('✅ Conversation and persona cleanup completed successfully');
+            console.log('✅ Conversation ended successfully on backend');
           } else {
-            console.warn('⚠️ Failed to end conversation on backend, but continuing...');
+            console.warn('⚠️ Failed to end conversation on backend');
           }
         } catch (endError) {
           console.warn('⚠️ Error ending conversation on backend:', endError);
-          // Continue anyway since camera is already disconnected
         }
       }
       
-      // Step 7: Store session completion data
+      // Step 5: Store session completion data
       localStorage.setItem('sessionCompleted', 'true');
       localStorage.setItem('sessionEndTime', new Date().toISOString());
       localStorage.setItem('sessionDuration', sessionDuration.toString());
       
-      // Step 8: Navigate to feedback page
-      console.log('Navigating to feedback page...');
+      // Step 6: Navigate to feedback page
+      console.log('✅ Navigating to feedback page...');
       navigate('/feedback/1');
       
     } catch (error) {
-      console.error('Error during session cleanup:', error);
-      setError('Error ending session. Camera and microphone have been disconnected.');
-      
-      // Ensure camera is disconnected even if there's an error
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-        if (userVideoRef.current) {
-          userVideoRef.current.srcObject = null;
-        }
-      }
+      console.error('❌ Error during session cleanup:', error);
+      setError('Error ending session. Please try again.');
+      setIsEnding(false);
     }
   };
 
-  // Download conversation transcript
-  const downloadTranscript = () => {
+  // Download REAL conversation transcript
+  const downloadRealTranscript = (transcript: any[]) => {
     try {
-      const transcript = conversationTranscriptRef.current;
-      
       if (transcript.length === 0) {
-        console.warn('No transcript data to download');
+        console.warn('⚠️ No real transcript data to download');
         return;
       }
       
-      const formattedTranscript = transcript.map(event => 
-        `[${event.timestamp}] ${event.participant}: ${event.content}`
-      ).join('\n\n');
+      // Format transcript for download
+      const formattedTranscript = transcript.map(event => {
+        const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
+        return `[${event.timestamp}] ${speaker}: ${event.content}`;
+      }).join('\n\n');
       
       const transcriptBlob = new Blob([formattedTranscript], { type: 'text/plain' });
       const url = URL.createObjectURL(transcriptBlob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `interview-transcript-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+      a.download = `interview-transcript-${conversationId}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
       
       document.body.appendChild(a);
       a.click();
@@ -340,28 +185,17 @@ const Interview = () => {
         URL.revokeObjectURL(url);
       }, 100);
       
-      console.log('📄 Transcript downloaded');
+      console.log('📄 Real transcript downloaded successfully');
     } catch (error) {
-      console.error('Error downloading transcript:', error);
+      console.error('❌ Error downloading real transcript:', error);
     }
   };
 
-  // Handle unexpected tab close with immediate cleanup
+  // Handle unexpected tab close
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      // Stop all tracks immediately
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      
-      // Stop Daily call
-      if (dailyCallRef.current) {
-        dailyCallRef.current.leave();
-        dailyCallRef.current.destroy();
-      }
-      
       // Use sendBeacon for reliable cleanup on tab close
-      if (conversationId) {
+      if (conversationId && !isEnding) {
         const data = JSON.stringify({ 
           conversationId,
           dynamicPersonaId 
@@ -373,43 +207,17 @@ const Interview = () => {
       event.returnValue = '';
     };
 
-    const handleVisibilityChange = () => {
-      if (document.hidden && streamRef.current) {
-        // Page is being hidden, stop tracks to save resources
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      
-      // Also cleanup on component unmount
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (dailyCallRef.current) {
-        dailyCallRef.current.leave();
-        dailyCallRef.current.destroy();
-      }
     };
-  }, [conversationId, dynamicPersonaId]);
+  }, [conversationId, dynamicPersonaId, isEnding]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   if (error) {
@@ -443,9 +251,9 @@ const Interview = () => {
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session (Daily.js Recording)
+                Live Interview Session - Tavus Recording
               </span>
-              {isRecording && (
+              {isRecording && !isEnding && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
                   Recording • {formatDuration(sessionDuration)} • Cloud Recording Active
                 </span>
@@ -453,158 +261,98 @@ const Interview = () => {
             </div>
             <button
               onClick={handleEndSession}
-              className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+              disabled={isEnding}
+              className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Square className="h-4 w-4 mr-2" />
-              End Session & Download
+              {isEnding ? 'Ending Session...' : 'End Session & Download'}
             </button>
           </div>
         </div>
       </div>
       
       <div className="max-w-6xl mx-auto p-8">
-        <div className="grid lg:grid-cols-3 gap-8 h-full">
-          {/* Main AI Interviewer Area - Large area (2/3 of screen) */}
-          <div className="lg:col-span-2 space-y-6">
-            <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
-              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-                AI Interviewer - Sarah
-              </h3>
-              
-              {conversationUrl ? (
-                <div className="space-y-4">
-                  <div className="bg-black rounded-lg aspect-video">
-                    <iframe
-                      ref={iframeRef}
-                      src={conversationUrl}
-                      className="w-full h-full rounded-lg"
-                      allow="camera; microphone"
-                      title="AI Interviewer"
-                    />
-                  </div>
-                  <p className="text-center text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                    Your AI interviewer Sarah is conducting a personalized interview with {userName}
-                  </p>
-                  <div className="text-center">
-                    <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      <span>Daily.js Cloud Recording Active</span>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="w-12 h-12 bg-white/20 rounded-full animate-pulse mx-auto mb-4"></div>
-                    <p className="text-white/70">Loading personalized interviewer...</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Sidebar with User Video and Controls (1/3 of screen) */}
-          <div className="space-y-6">
-            {/* User Video Preview - In sidebar */}
-            <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
-              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-                Your Camera Preview
-              </h3>
-              
-              <div className="relative bg-black rounded-lg aspect-video overflow-hidden">
-                <video 
-                  ref={userVideoRef} 
-                  autoPlay 
-                  playsInline 
-                  muted 
-                  className="w-full h-full object-cover" 
+        {/* Single Interview Area - ONLY Tavus iframe */}
+        <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
+          <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
+            AI Interview with Sarah - {userName}
+          </h3>
+          
+          {conversationUrl ? (
+            <div className="space-y-4">
+              <div className="bg-black rounded-lg aspect-video">
+                <iframe
+                  ref={iframeRef}
+                  src={conversationUrl}
+                  className="w-full h-full rounded-lg"
+                  allow="camera; microphone"
+                  title="AI Interview with Sarah"
                 />
-                
-                {/* Recording indicator */}
-                {isRecording && (
-                  <div className="absolute top-2 right-2">
-                    <div className="flex items-center space-x-2 bg-red-500 text-white px-2 py-1 rounded-full text-xs">
-                      <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                      <span>LIVE</span>
-                    </div>
-                  </div>
-                )}
               </div>
-              
-              <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
-                Your camera preview - Daily.js is recording the complete interview
-              </p>
+              <div className="text-center">
+                <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary mb-2">
+                  Your AI interviewer Sarah is conducting a personalized interview with {userName}
+                </p>
+                <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
+                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <span>Tavus Cloud Recording Active</span>
+                </div>
+              </div>
             </div>
+          ) : (
+            <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
+              <div className="text-center">
+                <div className="w-12 h-12 bg-white/20 rounded-full animate-pulse mx-auto mb-4"></div>
+                <p className="text-white/70">Loading personalized interviewer...</p>
+              </div>
+            </div>
+          )}
+        </div>
 
-            {/* Interview Controls */}
-            <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
-              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-                Interview Controls
-              </h3>
-              <div className="space-y-3">
-                <button 
-                  onClick={downloadTranscript}
-                  disabled={conversationTranscriptRef.current.length === 0}
-                  className="w-full flex items-center justify-center px-4 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download Real Transcript
-                </button>
-              </div>
+        {/* Session Info */}
+        <div className="mt-6 bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
+          <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
+            Session Information
+          </h3>
+          <div className="grid md:grid-cols-3 gap-4 text-sm">
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Status:</span>
+              <span className={`font-medium ${isEnding ? 'text-orange-500' : 'text-green-500'}`}>
+                {isEnding ? 'Ending Session...' : isRecording ? 'Live Interview' : 'Ready'}
+              </span>
             </div>
-
-            {/* Session Info */}
-            <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
-              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-                Session Info
-              </h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Status:</span>
-                  <span className="text-green-500 font-medium">
-                    {isRecording ? 'Live Interview' : 'Ready'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Duration:</span>
-                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
-                    {formatDuration(sessionDuration)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
-                  <span className="text-green-500 font-medium">
-                    Daily.js Cloud
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera/Mic:</span>
-                  <span className={`font-medium ${streamRef.current ? 'text-green-500' : 'text-red-500'}`}>
-                    {streamRef.current ? 'Active' : 'Disconnected'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Transcript Events:</span>
-                  <span className="text-blue-500 font-medium">
-                    {conversationTranscriptRef.current.length}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Daily Call:</span>
-                  <span className={`font-medium ${dailyCallRef.current ? 'text-green-500' : 'text-gray-500'}`}>
-                    {dailyCallRef.current ? 'Connected' : 'Disconnected'}
-                  </span>
-                </div>
-                {dynamicPersonaId && (
-                  <div className="flex justify-between">
-                    <span className="text-light-text-secondary dark:text-dark-text-secondary">Persona:</span>
-                    <span className="text-blue-500 font-medium text-xs">
-                      Dynamic
-                    </span>
-                  </div>
-                )}
-              </div>
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Duration:</span>
+              <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
+                {formatDuration(sessionDuration)}
+              </span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
+              <span className="text-green-500 font-medium">
+                Tavus Cloud
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Candidate:</span>
+              <span className="text-blue-500 font-medium">
+                {userName}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Job Title:</span>
+              <span className="text-blue-500 font-medium">
+                {localStorage.getItem('jobTitle') || 'Not specified'}
+              </span>
+            </div>
+            {dynamicPersonaId && (
+              <div className="flex justify-between">
+                <span className="text-light-text-secondary dark:text-dark-text-secondary">AI Persona:</span>
+                <span className="text-purple-500 font-medium text-xs">
+                  Dynamic
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>

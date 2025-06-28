@@ -188,7 +188,6 @@ IMPORTANT REMINDERS:
         feedbackMetrics: feedbackMetrics || {},
         conversationId: conversation_id,
         conversationalContext: conversationalContext,
-        recordingEnabled: false, // Will use Daily.js recording instead
         timestamp: new Date().toISOString()
       };
       
@@ -199,7 +198,6 @@ IMPORTANT REMINDERS:
         customCriteria: sessionData.customCriteria,
         feedbackMetrics: sessionData.feedbackMetrics,
         conversationalContext: sessionData.conversationalContext.substring(0, 100) + "...",
-        recordingEnabled: sessionData.recordingEnabled,
         timestamp: sessionData.timestamp
       });
       
@@ -207,14 +205,13 @@ IMPORTANT REMINDERS:
         success: true,
         conversation_url,
         conversation_id,
-        message: 'Interview conversation created successfully with Daily.js recording',
+        message: 'Interview conversation created successfully with Tavus recording',
         sessionData: {
           jobTitle: sessionData.jobTitle,
           userName: sessionData.userName,
           hasCustomInstructions: !!customInstructions,
           hasCustomCriteria: !!customCriteria,
           conversationId: conversation_id,
-          recordingEnabled: false, // Using Daily.js instead
           method: 'conversational_context'
         }
       });
@@ -283,7 +280,6 @@ IMPORTANT REMINDERS:
           feedbackMetrics: feedbackMetrics || {},
           dynamicPersonaId: dynamicPersonaId,
           conversationId: conversation_id,
-          recordingEnabled: false, // Using Daily.js instead
           timestamp: new Date().toISOString()
         };
         
@@ -291,7 +287,7 @@ IMPORTANT REMINDERS:
           success: true,
           conversation_url,
           conversation_id,
-          message: 'Interview conversation created successfully with dynamic persona and Daily.js recording (fallback)',
+          message: 'Interview conversation created successfully with dynamic persona and Tavus recording (fallback)',
           sessionData: {
             jobTitle: sessionData.jobTitle,
             userName: sessionData.userName,
@@ -299,7 +295,6 @@ IMPORTANT REMINDERS:
             hasCustomCriteria: !!customCriteria,
             conversationId: conversation_id,
             dynamicPersonaId: dynamicPersonaId,
-            recordingEnabled: false, // Using Daily.js instead
             method: 'dynamic_persona'
           }
         });
@@ -328,6 +323,72 @@ IMPORTANT REMINDERS:
         error: error instanceof Error ? error.message : 'Internal server error'
       });
     }
+  }
+};
+
+// New endpoint to get conversation data
+export const getConversation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { conversationId } = req.params;
+    
+    const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
+    
+    if (!TAVUS_API_KEY) {
+      res.status(500).json({
+        success: false,
+        error: 'Server configuration error: Missing API credentials'
+      });
+      return;
+    }
+
+    if (!conversationId) {
+      res.status(400).json({
+        success: false,
+        error: 'Conversation ID is required'
+      });
+      return;
+    }
+
+    console.log("🔍 Retrieving conversation data for:", conversationId);
+
+    try {
+      const conversationResponse = await axios.get(
+        `https://tavusapi.com/v2/conversations/${conversationId}`,
+        {
+          headers: { 
+            'x-api-key': TAVUS_API_KEY,
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        }
+      );
+      
+      const conversationData = conversationResponse.data;
+      console.log('✅ Retrieved conversation data:', Object.keys(conversationData));
+      
+      res.status(200).json({
+        success: true,
+        ...conversationData
+      });
+      
+    } catch (apiError) {
+      console.error('❌ Error retrieving conversation from Tavus API:', apiError);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve conversation data'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error in getConversation:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
   }
 };
 

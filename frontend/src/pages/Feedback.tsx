@@ -57,36 +57,38 @@ const Feedback = () => {
       try {
         setLoading(true);
         
-        // Get stored conversation transcript and metrics
+        // Get stored conversation transcript and session data
         const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
-        const storedMetrics = localStorage.getItem(`metrics_${sessionData.conversationId}`);
         const storedSession = localStorage.getItem(`session_${sessionData.conversationId}`);
         
         let realTranscript = null;
         let realAnswers: string[] = [];
+        let sessionDataFromStorage = null;
+        
+        if (storedSession) {
+          sessionDataFromStorage = JSON.parse(storedSession);
+          console.log('📊 Retrieved session data from storage:', sessionDataFromStorage);
+        }
         
         if (storedTranscript) {
           const transcriptData = JSON.parse(storedTranscript);
           console.log('📝 Raw transcript data:', transcriptData);
           
-          // Extract actual conversation content
-          const conversationEvents = transcriptData.filter((event: any) => 
-            event.type === 'conversation' || event.type === 'message' || event.type === 'transcript'
-          );
+          // Build readable transcript from stored data
+          if (Array.isArray(transcriptData)) {
+            realTranscript = transcriptData.map((event: any) => {
+              const speaker = event.participant === 'ai' || event.participant === 'system' ? 'Interviewer (Sarah)' : `Candidate (${sessionData.userName})`;
+              return `${speaker}: ${event.content}`;
+            }).join('\n\n');
+            
+            // Extract candidate answers
+            realAnswers = transcriptData
+              .filter((event: any) => event.participant !== 'ai' && event.participant !== 'system')
+              .map((event: any) => event.content);
+          }
           
-          // Build readable transcript
-          realTranscript = conversationEvents.map((event: any) => {
-            const speaker = event.participant === 'ai' || event.participant === 'system' ? 'Interviewer (Sarah)' : `Candidate (${sessionData.userName})`;
-            return `${speaker}: ${event.content}`;
-          }).join('\n\n');
-          
-          // Extract candidate answers
-          realAnswers = conversationEvents
-            .filter((event: any) => event.participant !== 'ai' && event.participant !== 'system')
-            .map((event: any) => event.content);
-          
-          console.log('✅ Using stored conversation transcript with', conversationEvents.length, 'events');
-          console.log('📄 Real transcript preview:', realTranscript.substring(0, 200) + '...');
+          console.log('✅ Using stored conversation transcript');
+          console.log('📄 Real transcript preview:', realTranscript?.substring(0, 200) + '...');
         }
         
         // Call the analyze endpoint with real conversation data
@@ -164,7 +166,7 @@ const Feedback = () => {
           ],
           summary: `Strong overall performance with good communication skills and professional presentation. ${sessionData.userName} demonstrated excellent use of the STAR method and showed emotional intelligence in handling workplace challenges. The candidate shows genuine enthusiasm for the ${sessionData.role} role and has a solution-oriented mindset. Areas for improvement include providing more specific examples and quantifying achievements to strengthen impact.`,
           recommendations: [
-            "Practice providing more specific examples with measurable outcomes",
+            `Practice providing more specific examples with measurable outcomes, ${sessionData.userName}`,
             "Prepare 2-3 detailed STAR method stories for different competencies",
             "Work on reducing minor filler words during responses",
             "Maintain consistent eye contact throughout longer answers",
@@ -178,47 +180,25 @@ const Feedback = () => {
       }
     };
 
-    // Load Tavus recording if available
-    const loadTavusRecording = async () => {
-      if (sessionData.conversationId) {
-        try {
-          // Try to get recording URL from Tavus API
-          const response = await fetch(`http://localhost:3001/api/interview/get-recording/${sessionData.conversationId}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.recording_url) {
-              setRecordingUrl(data.recording_url);
-              setRecordingMetadata({
-                format: 'mp4',
-                source: 'tavus_cloud',
-                size: 'Unknown',
-                status: 'available'
-              });
-              console.log('✅ Loaded Tavus cloud recording:', data.recording_url);
-            }
-          }
-        } catch (error) {
-          console.warn('⚠️ Could not load Tavus recording:', error);
-        }
-      }
-      
-      // Fallback: Check localStorage for local recording
+    // Load recording if available
+    const loadRecording = async () => {
+      // Check localStorage for recording
       const storedRecording = localStorage.getItem(`recording_${sessionData.conversationId}`);
       const storedMetadata = localStorage.getItem(`recording_${sessionData.conversationId}_metadata`);
       
-      if (storedRecording && !recordingUrl) {
+      if (storedRecording) {
         setRecordingUrl(storedRecording);
-        console.log('✅ Loaded local recording from localStorage');
+        console.log('✅ Loaded recording from localStorage');
       }
       
-      if (storedMetadata && !recordingMetadata) {
+      if (storedMetadata) {
         setRecordingMetadata(JSON.parse(storedMetadata));
         console.log('✅ Loaded recording metadata:', JSON.parse(storedMetadata));
       }
     };
 
     fetchAnalysis();
-    loadTavusRecording();
+    loadRecording();
   }, [id, sessionData.role, sessionData.userName, sessionData.conversationId]);
 
   const renderCircularProgress = (value: number, size: 'small' | 'large' = 'large') => {
@@ -279,9 +259,10 @@ const Feedback = () => {
     const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
     if (storedTranscript) {
       const transcriptData = JSON.parse(storedTranscript);
-      const formattedTranscript = transcriptData.map((event: any) => 
-        `[${event.timestamp}] ${event.participant}: ${event.content}`
-      ).join('\n\n');
+      const formattedTranscript = transcriptData.map((event: any) => {
+        const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${sessionData.userName})`;
+        return `[${event.timestamp}] ${speaker}: ${event.content}`;
+      }).join('\n\n');
       
       const blob = new Blob([formattedTranscript], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
@@ -336,16 +317,14 @@ const Feedback = () => {
                     <Play className="h-16 w-16 text-white/50 mx-auto mb-4" />
                     <p className="text-white/70">Interview Recording</p>
                     <p className="text-white/50 text-sm mt-2">
-                      {recordingMetadata?.status === 'too_large_for_storage' 
-                        ? 'Recording too large for browser storage - check downloads' 
-                        : sessionData.sessionCompleted 
-                          ? 'Recording completed and stored' 
-                          : 'Recording in progress'
+                      {sessionData.sessionCompleted 
+                        ? 'Recording completed - check downloads folder' 
+                        : 'Recording in progress'
                       }
                     </p>
                     {recordingMetadata && (
                       <p className="text-white/40 text-xs mt-1">
-                        Source: {recordingMetadata.source || 'Local'} • Format: {recordingMetadata.format || 'mp4'}
+                        Format: {recordingMetadata.format || 'mp4'} • Size: {recordingMetadata.size ? Math.round(recordingMetadata.size / 1024 / 1024) + 'MB' : 'Unknown'}
                       </p>
                     )}
                   </div>

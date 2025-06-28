@@ -1,16 +1,19 @@
 import express from 'express';
-import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback } from '../controllers/interviewController';
+import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback, getConversation } from '../controllers/interviewController';
 import { validateInterviewRequest, validateConversationRequest } from '../middleware/validation';
 
 const router = express.Router();
 
-// POST /api/interview/create-conversation - Enhanced dynamic persona endpoint with recording
+// POST /api/interview/create-conversation - Enhanced dynamic persona endpoint
 router.post('/create-conversation', validateConversationRequest, createConversation);
 
-// POST /api/interview/end-conversation - New endpoint to terminate sessions
+// GET /api/interview/get-conversation/:conversationId - Get conversation data
+router.get('/get-conversation/:conversationId', getConversation);
+
+// POST /api/interview/end-conversation - Endpoint to terminate sessions
 router.post('/end-conversation', endConversation);
 
-// POST /api/interview/analyze - New endpoint for AI-powered analysis with real data
+// POST /api/interview/analyze - Endpoint for AI-powered analysis with real data
 router.post('/analyze', analyzeInterview);
 
 // POST /api/interview/conversation-callback - Webhook for conversation transcripts and recordings
