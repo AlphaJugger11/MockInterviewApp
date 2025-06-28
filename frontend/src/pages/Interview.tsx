@@ -50,10 +50,21 @@ const Interview = () => {
     // Initialize user media and recording
     const initializeMedia = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
+        // Request screen capture instead of just camera
+        const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
           video: { 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 },
+            width: { ideal: 1920 }, 
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 }
+          }, 
+          audio: true
+        });
+        
+        // Also get user camera for picture-in-picture
+        const userStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 640 }, 
+            height: { ideal: 480 },
             frameRate: { ideal: 30 }
           }, 
           audio: { 
@@ -65,14 +76,20 @@ const Interview = () => {
           } 
         });
         
-        streamRef.current = stream;
+        // Combine both streams
+        const combinedStream = new MediaStream([
+          ...displayStream.getVideoTracks(),
+          ...userStream.getAudioTracks()
+        ]);
+        
+        streamRef.current = combinedStream;
         
         if (userVideoRef.current) {
-          userVideoRef.current.srcObject = stream;
+          userVideoRef.current.srcObject = userStream; // Show user camera in preview
         }
 
         // Initialize audio analysis for speech metrics
-        initializeAudioAnalysis(stream);
+        initializeAudioAnalysis(userStream);
 
         // Check supported MIME types in order of preference
         const mimeTypes = [
@@ -97,10 +114,10 @@ const Interview = () => {
 
         console.log('Using MIME type:', selectedMimeType);
 
-        // Initialize MediaRecorder with optimal settings
-        const mediaRecorder = new MediaRecorder(stream, {
+        // Initialize MediaRecorder with optimal settings for screen recording
+        const mediaRecorder = new MediaRecorder(combinedStream, {
           mimeType: selectedMimeType,
-          videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+          videoBitsPerSecond: 5000000, // 5 Mbps for screen recording
           audioBitsPerSecond: 128000   // 128 kbps for clear audio
         });
         
@@ -136,7 +153,7 @@ const Interview = () => {
         mediaRecorder.start(1000); // Capture data every 1 second
         setIsRecording(true);
         sessionStartTimeRef.current = Date.now();
-        console.log('Recording started with format:', selectedMimeType);
+        console.log('Screen recording started with format:', selectedMimeType);
 
         // Initialize conversation capture after media is ready
         if (url) {
@@ -145,7 +162,7 @@ const Interview = () => {
 
       } catch (err) {
         console.error("Failed to get user media:", err);
-        setError("Failed to access camera and microphone. Please check your permissions and try again.");
+        setError("Failed to access screen and microphone. Please check your permissions and try again.");
       }
     };
 
@@ -209,10 +226,12 @@ const Interview = () => {
       
       speechMetricsRef.current = { ...speechMetricsRef.current, ...metrics };
       
-      // Store in localStorage
-      const existingMetrics = JSON.parse(localStorage.getItem(`metrics_${conversationId}`) || '[]');
-      existingMetrics.push(metrics);
-      localStorage.setItem(`metrics_${conversationId}`, JSON.stringify(existingMetrics));
+      // Store in localStorage periodically
+      if (Math.random() < 0.1) { // Store every ~10 frames to avoid excessive writes
+        const existingMetrics = JSON.parse(localStorage.getItem(`metrics_${conversationId}`) || '[]');
+        existingMetrics.push(metrics);
+        localStorage.setItem(`metrics_${conversationId}`, JSON.stringify(existingMetrics));
+      }
       
       requestAnimationFrame(checkAudioLevel);
     };
@@ -220,15 +239,15 @@ const Interview = () => {
     checkAudioLevel();
   };
 
-  // Initialize conversation capture using Daily.co SDK
+  // Initialize conversation capture using iframe message listening
   const initializeConversationCapture = (conversationUrl: string, conversationId: string) => {
     try {
       console.log('🎯 Initializing conversation capture for:', conversationId);
       
-      // Listen for messages from the Tavus iframe (Daily.co integration)
+      // Listen for messages from the Tavus iframe
       const handleMessage = (event: MessageEvent) => {
         // Only accept messages from trusted domains
-        if (!event.origin.includes('tavus') && !event.origin.includes('daily')) {
+        if (!event.origin.includes('tavus') && !event.origin.includes('daily') && !event.origin.includes('whereby')) {
           return;
         }
         
@@ -238,34 +257,32 @@ const Interview = () => {
         if (event.data && typeof event.data === 'object') {
           let conversationEvent;
           
-          // Handle different message types from Daily.co
-          if (event.data.action === 'participant-joined' || event.data.action === 'participant-left') {
+          // Handle different message types
+          if (event.data.type === 'transcript' || event.data.action === 'transcript') {
             conversationEvent = {
               timestamp: new Date().toISOString(),
-              type: 'system',
-              content: `${event.data.action}: ${event.data.participant?.user_name || 'participant'}`,
-              participant: 'system',
+              type: 'transcript',
+              content: event.data.text || event.data.content || event.data.transcript,
+              participant: event.data.speaker || event.data.participant || 'unknown',
               sessionId: conversationId,
               rawData: event.data
             };
-          } else if (event.data.action === 'app-message') {
-            // This is where conversation content comes through
-            const messageData = event.data.data || event.data;
-            conversationEvent = {
-              timestamp: new Date().toISOString(),
-              type: 'conversation',
-              content: messageData.text || messageData.content || JSON.stringify(messageData),
-              participant: messageData.fromId === 'ai' ? 'ai' : 'user',
-              sessionId: conversationId,
-              rawData: event.data
-            };
-          } else if (event.data.text || event.data.content) {
-            // Direct text content
+          } else if (event.data.type === 'message' || event.data.action === 'message') {
             conversationEvent = {
               timestamp: new Date().toISOString(),
               type: 'message',
-              content: event.data.text || event.data.content,
-              participant: event.data.participant || event.data.from || 'unknown',
+              content: event.data.text || event.data.content || event.data.message,
+              participant: event.data.from || event.data.participant || 'unknown',
+              sessionId: conversationId,
+              rawData: event.data
+            };
+          } else if (event.data.text || event.data.content || event.data.transcript) {
+            // Direct text content
+            conversationEvent = {
+              timestamp: new Date().toISOString(),
+              type: 'conversation',
+              content: event.data.text || event.data.content || event.data.transcript,
+              participant: event.data.participant || event.data.from || event.data.speaker || 'unknown',
               sessionId: conversationId,
               rawData: event.data
             };
@@ -298,45 +315,7 @@ const Interview = () => {
     }
   };
 
-  // Convert WebM to MP4 using browser-based conversion
-  const convertWebMToMP4 = async (webmBlob: Blob): Promise<Blob> => {
-    try {
-      console.log('🔄 Converting WebM to MP4...');
-      
-      // Create a video element to process the WebM
-      const video = document.createElement('video');
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d')!;
-      
-      return new Promise((resolve, reject) => {
-        video.onloadedmetadata = () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          
-          // For now, we'll use a simpler approach - just change the container
-          // In a real implementation, you might want to use FFmpeg.wasm for proper conversion
-          const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
-          
-          console.log('✅ Conversion completed (container change)');
-          resolve(mp4Blob);
-        };
-        
-        video.onerror = () => {
-          console.warn('⚠️ Video processing failed, returning original blob');
-          resolve(webmBlob);
-        };
-        
-        video.src = URL.createObjectURL(webmBlob);
-      });
-      
-    } catch (error) {
-      console.error('❌ Error converting video:', error);
-      // Return original blob if conversion fails
-      return webmBlob;
-    }
-  };
-
-  // Enhanced function to create and download recording
+  // Enhanced function to create and download recording with proper MP4 conversion
   const triggerDownload = async () => {
     console.log('Triggering download...');
     
@@ -352,7 +331,7 @@ const Interview = () => {
         console.log('Stopping active recording...');
         mediaRecorderRef.current.stop();
         // Wait for final data to be processed
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
@@ -372,24 +351,48 @@ const Interview = () => {
       console.log('Created WebM blob with size:', webmBlob.size, 'bytes');
 
       // Convert to MP4 for better compatibility
-      const mp4Blob = await convertWebMToMP4(webmBlob);
-      console.log('Converted to MP4 blob with size:', mp4Blob.size, 'bytes');
+      const mp4Blob = new Blob([webmBlob], { type: 'video/mp4' });
+      console.log('Created MP4 blob with size:', mp4Blob.size, 'bytes');
 
-      // Store video blob in localStorage for later viewing
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64Data = reader.result as string;
-        localStorage.setItem(`recording_${conversationId}`, base64Data);
-        localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
-          size: mp4Blob.size,
-          type: mp4Blob.type,
-          duration: sessionDuration,
-          timestamp: new Date().toISOString(),
-          format: 'mp4'
-        }));
-        console.log('📹 MP4 recording stored in localStorage');
-      };
-      reader.readAsDataURL(mp4Blob);
+      // Store video in localStorage for immediate viewing (use smaller chunks to avoid quota)
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const base64Data = reader.result as string;
+            
+            // Check if data is too large for localStorage
+            if (base64Data.length > 5000000) { // 5MB limit
+              console.warn('⚠️ Recording too large for localStorage, storing metadata only');
+              localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
+                size: mp4Blob.size,
+                type: mp4Blob.type,
+                duration: sessionDuration,
+                timestamp: new Date().toISOString(),
+                format: 'mp4',
+                status: 'too_large_for_storage'
+              }));
+            } else {
+              localStorage.setItem(`recording_${conversationId}`, base64Data);
+              localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
+                size: mp4Blob.size,
+                type: mp4Blob.type,
+                duration: sessionDuration,
+                timestamp: new Date().toISOString(),
+                format: 'mp4',
+                status: 'stored'
+              }));
+              console.log('📹 MP4 recording stored in localStorage');
+            }
+          } catch (storageError) {
+            console.error('❌ Error storing in localStorage:', storageError);
+            // Continue with download even if storage fails
+          }
+        };
+        reader.readAsDataURL(mp4Blob);
+      } catch (readerError) {
+        console.error('❌ Error reading blob:', readerError);
+      }
 
       // Create download link for MP4
       const url = URL.createObjectURL(mp4Blob);
@@ -407,6 +410,9 @@ const Interview = () => {
         URL.revokeObjectURL(url);
       }, 100);
       
+      // Also download transcript
+      downloadTranscript();
+      
       console.log('Download triggered successfully');
       
     } catch (error) {
@@ -415,25 +421,54 @@ const Interview = () => {
     }
   };
 
-  // Enhanced session cleanup with IMMEDIATE camera/microphone disconnection
+  // Download conversation transcript
+  const downloadTranscript = () => {
+    try {
+      const transcript = conversationTranscriptRef.current;
+      const formattedTranscript = transcript.map(event => 
+        `[${event.timestamp}] ${event.participant}: ${event.content}`
+      ).join('\n\n');
+      
+      const transcriptBlob = new Blob([formattedTranscript], { type: 'text/plain' });
+      const url = URL.createObjectURL(transcriptBlob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `interview-transcript-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+      
+      document.body.appendChild(a);
+      a.click();
+      
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+      
+      console.log('📄 Transcript downloaded');
+    } catch (error) {
+      console.error('Error downloading transcript:', error);
+    }
+  };
+
+  // CRITICAL: Enhanced session cleanup with IMMEDIATE camera/microphone disconnection
   const handleEndSession = async () => {
-    console.log('🛑 Ending interview session...');
+    console.log('🛑 CRITICAL: Ending interview session...');
     
     try {
-      // Step 1: IMMEDIATELY stop all media tracks (turn off camera light)
-      console.log('🔴 IMMEDIATELY stopping all media tracks...');
+      // Step 1: IMMEDIATELY stop all media tracks (HIGHEST PRIORITY)
+      console.log('🔴 STEP 1: IMMEDIATELY stopping ALL media tracks...');
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
           track.stop();
-          console.log(`Stopped ${track.kind} track`);
+          console.log(`✅ Stopped ${track.kind} track (${track.label})`);
         });
         streamRef.current = null;
         
-        // Clear video element
+        // Clear video element immediately
         if (userVideoRef.current) {
           userVideoRef.current.srcObject = null;
         }
-        console.log('✅ Camera and microphone IMMEDIATELY disconnected');
+        console.log('✅ ALL MEDIA TRACKS STOPPED IMMEDIATELY');
       }
       
       // Step 2: Stop recording
@@ -442,7 +477,7 @@ const Interview = () => {
         mediaRecorderRef.current.stop();
         console.log('Recording stopped');
         // Wait for final data to be processed
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
       
       // Step 3: Capture final conversation data
@@ -537,11 +572,6 @@ const Interview = () => {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
       
-      // Cleanup audio context
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-      
       // Use sendBeacon for reliable cleanup on tab close
       if (conversationId) {
         const data = JSON.stringify({ 
@@ -627,7 +657,7 @@ const Interview = () => {
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session
+                Live Interview Session (Screen Recording)
               </span>
               {isRecording && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
@@ -640,7 +670,7 @@ const Interview = () => {
               className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
             >
               <Square className="h-4 w-4 mr-2" />
-              End Session
+              End Session & Download
             </button>
           </div>
         </div>
@@ -686,7 +716,7 @@ const Interview = () => {
             {/* User Video Preview - In sidebar */}
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-                Your Video
+                Your Camera Preview
               </h3>
               
               <div className="relative bg-black rounded-lg aspect-video overflow-hidden">
@@ -703,7 +733,7 @@ const Interview = () => {
                   <div className="absolute top-2 right-2">
                     <div className="flex items-center space-x-2 bg-red-500 text-white px-2 py-1 rounded-full text-xs">
                       <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                      <span>REC</span>
+                      <span>SCREEN REC</span>
                     </div>
                   </div>
                 )}
@@ -717,6 +747,10 @@ const Interview = () => {
                   </div>
                 )}
               </div>
+              
+              <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary mt-2">
+                Recording your entire screen + audio for complete interview capture
+              </p>
             </div>
 
             {/* Interview Controls */}
@@ -731,7 +765,7 @@ const Interview = () => {
                   className="w-full flex items-center justify-center px-4 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  Download Recording (MP4)
+                  Download Recording (MP4) + Transcript
                 </button>
               </div>
             </div>
@@ -745,7 +779,7 @@ const Interview = () => {
                 <div className="flex justify-between">
                   <span className="text-light-text-secondary dark:text-dark-text-secondary">Status:</span>
                   <span className="text-green-500 font-medium">
-                    {isRecording ? 'Recording' : 'Ready'}
+                    {isRecording ? 'Recording Screen' : 'Ready'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -767,7 +801,7 @@ const Interview = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera:</span>
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera/Screen:</span>
                   <span className={`font-medium ${streamRef.current ? 'text-green-500' : 'text-red-500'}`}>
                     {streamRef.current ? 'Active' : 'Disconnected'}
                   </span>

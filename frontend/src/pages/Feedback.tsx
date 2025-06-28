@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Share2, Play, TrendingUp, Eye, Mic, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Share2, Play, TrendingUp, Eye, Mic, MessageSquare, Download } from 'lucide-react';
 import Layout from '../components/Layout';
 
 interface AnalysisData {
@@ -31,6 +31,7 @@ const Feedback = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [recordingMetadata, setRecordingMetadata] = useState<any>(null);
 
   // Get session data from localStorage
   const sessionData = {
@@ -70,12 +71,12 @@ const Feedback = () => {
           
           // Extract actual conversation content
           const conversationEvents = transcriptData.filter((event: any) => 
-            event.type === 'conversation' || event.type === 'message'
+            event.type === 'conversation' || event.type === 'message' || event.type === 'transcript'
           );
           
           // Build readable transcript
           realTranscript = conversationEvents.map((event: any) => {
-            const speaker = event.participant === 'ai' || event.participant === 'system' ? 'Interviewer' : 'Candidate';
+            const speaker = event.participant === 'ai' || event.participant === 'system' ? 'Interviewer (Sarah)' : `Candidate (${sessionData.userName})`;
             return `${speaker}: ${event.content}`;
           }).join('\n\n');
           
@@ -175,9 +176,16 @@ const Feedback = () => {
     // Load stored recording if available
     const loadStoredRecording = () => {
       const storedRecording = localStorage.getItem(`recording_${sessionData.conversationId}`);
+      const storedMetadata = localStorage.getItem(`recording_${sessionData.conversationId}_metadata`);
+      
       if (storedRecording) {
         setRecordingUrl(storedRecording);
         console.log('✅ Loaded stored recording from localStorage');
+      }
+      
+      if (storedMetadata) {
+        setRecordingMetadata(JSON.parse(storedMetadata));
+        console.log('✅ Loaded recording metadata:', JSON.parse(storedMetadata));
       }
     };
 
@@ -224,6 +232,33 @@ const Feedback = () => {
     );
   };
 
+  const downloadRecording = () => {
+    if (recordingUrl) {
+      const link = document.createElement('a');
+      link.href = recordingUrl;
+      link.download = `interview-recording-${sessionData.conversationId}.mp4`;
+      link.click();
+    }
+  };
+
+  const downloadTranscript = () => {
+    const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
+    if (storedTranscript) {
+      const transcriptData = JSON.parse(storedTranscript);
+      const formattedTranscript = transcriptData.map((event: any) => 
+        `[${event.timestamp}] ${event.participant}: ${event.content}`
+      ).join('\n\n');
+      
+      const blob = new Blob([formattedTranscript], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `interview-transcript-${sessionData.conversationId}.txt`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
   const renderTabContent = () => {
     if (loading) {
       return (
@@ -267,29 +302,45 @@ const Feedback = () => {
                     <Play className="h-16 w-16 text-white/50 mx-auto mb-4" />
                     <p className="text-white/70">Interview Recording</p>
                     <p className="text-white/50 text-sm mt-2">
-                      {sessionData.sessionCompleted ? 'Recording completed and stored locally' : 'Recording in progress'}
+                      {recordingMetadata?.status === 'too_large_for_storage' 
+                        ? 'Recording too large for browser storage - check downloads' 
+                        : sessionData.sessionCompleted 
+                          ? 'Recording completed and stored locally' 
+                          : 'Recording in progress'
+                      }
                     </p>
-                    <button 
-                      onClick={() => {
-                        const storedRecording = localStorage.getItem(`recording_${sessionData.conversationId}`);
-                        if (storedRecording) {
-                          const link = document.createElement('a');
-                          link.href = storedRecording;
-                          link.download = `interview-recording-${sessionData.conversationId}.mp4`;
-                          link.click();
-                        }
-                      }}
-                      className="mt-4 px-6 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors"
-                    >
-                      {recordingUrl ? 'Download Recording' : 'No Recording Available'}
-                    </button>
+                    {recordingMetadata && (
+                      <p className="text-white/40 text-xs mt-1">
+                        Size: {Math.round(recordingMetadata.size / 1024 / 1024)}MB • Format: {recordingMetadata.format}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
-              <button className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity">
-                <Share2 className="h-4 w-4 mr-2" />
-                Share for Mentor Review
-              </button>
+              
+              <div className="flex space-x-4">
+                <button 
+                  onClick={downloadRecording}
+                  disabled={!recordingUrl}
+                  className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Recording
+                </button>
+                
+                <button 
+                  onClick={downloadTranscript}
+                  className="inline-flex items-center px-4 py-2 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Transcript
+                </button>
+                
+                <button className="inline-flex items-center px-4 py-2 bg-green-500 text-white rounded-lg hover:opacity-90 transition-opacity">
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Share for Mentor Review
+                </button>
+              </div>
             </div>
 
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-xl p-6 border border-light-border dark:border-dark-border">

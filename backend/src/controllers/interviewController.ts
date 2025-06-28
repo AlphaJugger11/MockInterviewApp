@@ -35,13 +35,14 @@ CRITICAL REQUIREMENTS:
 - Your name is Sarah (NEVER introduce yourself as Jane Smith or any other name)
 - You are interviewing ${userName} (use this exact name) for a ${jobTitle} position
 - Start by greeting ${userName} personally: "Hello ${userName}! I'm Sarah, your AI interview coach."
+- Conduct a REALISTIC interview - ask questions, listen to answers, then ask follow-up questions
+- DO NOT provide feedback after every answer - this should feel like a real interview
+- Only provide feedback at the end or when specifically asked
 - Ask relevant questions specifically for the ${jobTitle} role
-- Provide constructive feedback after each answer
-- Analyze both verbal responses and non-verbal cues
-- Be encouraging but honest in your evaluation
+- Be professional, encouraging, and realistic like a real interviewer
 - Remember you are Sarah throughout the entire conversation
 
-Generate a complete system prompt that establishes Sarah's identity, role, and interview approach for the ${jobTitle} position with ${userName}. Make sure to emphasize that you are Sarah and you are interviewing ${userName}.`;
+Generate a complete system prompt that establishes Sarah's identity, role, and realistic interview approach for the ${jobTitle} position with ${userName}. Make sure to emphasize that you are Sarah and you are interviewing ${userName} in a realistic manner.`;
     
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -122,22 +123,25 @@ export const createConversation = async (
     const conversationalContext = `
 CRITICAL IDENTITY INSTRUCTIONS:
 - You are Sarah, an AI interview coach (NEVER introduce yourself as Jane Smith or any other name)
-- You are conducting a mock interview with ${userName} for a ${jobTitle} position
+- You are conducting a REALISTIC mock interview with ${userName} for a ${jobTitle} position
 - Always refer to the candidate as ${userName}
 - Start the conversation by greeting ${userName} personally
+- Conduct this like a REAL interview - ask questions, listen, then ask follow-up questions
+- DO NOT provide feedback after every answer - save feedback for the end
+- Make this feel like an actual professional interview
 
 INTERVIEW CONTEXT:
 ${generatedInstructions}
 
-EVALUATION CRITERIA:
+EVALUATION CRITERIA (for internal use only):
 ${judgmentCriteria}
 
 IMPORTANT REMINDERS:
 - Your name is Sarah throughout the entire conversation
 - The candidate's name is ${userName}
 - The role being interviewed for is ${jobTitle}
-- Provide real-time feedback after each answer
-- Analyze both verbal and non-verbal communication
+- Conduct a realistic interview experience
+- Save detailed feedback for the end of the interview
 `;
 
     console.log("Final conversational context length:", conversationalContext.length);
@@ -487,6 +491,7 @@ export const analyzeInterview = async (
 
     // Try to get real conversation data if conversationId is provided
     let realTranscript = transcript;
+    let realAnswers = answers || [];
     let realMetrics = {};
     let dataSource = 'provided_data';
     
@@ -510,6 +515,12 @@ export const analyzeInterview = async (
           realTranscript = conversationData.transcript;
           dataSource = 'real_conversation';
           console.log('✅ Using real conversation transcript from Tavus API');
+          
+          // Extract real answers from transcript
+          const lines = realTranscript.split('\n');
+          realAnswers = lines
+            .filter(line => line.includes('Candidate') || line.includes(candidateName))
+            .map(line => line.replace(/^.*?:\s*/, ''));
         }
         
         if (conversationData.perception_analysis) {
@@ -524,19 +535,19 @@ export const analyzeInterview = async (
 
     // If we have a real transcript, use it; otherwise create a personalized mock
     const analysisTranscript = realTranscript || `
-    Interviewer: Hello ${candidateName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${targetRole} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience.
+    Interviewer (Sarah): Hello ${candidateName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${targetRole} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience.
     
-    Interviewer: Let's begin with: Tell me about yourself and why you're interested in this ${targetRole} role.
-    Candidate: Thank you for having me, Sarah. I'm ${candidateName}, a passionate professional with several years of experience in my field. I'm particularly interested in this ${targetRole} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.
+    Interviewer (Sarah): Let's begin with: Tell me about yourself and why you're interested in this ${targetRole} role.
+    Candidate (${candidateName}): Thank you for having me, Sarah. I'm ${candidateName}, a passionate professional with several years of experience in my field. I'm particularly interested in this ${targetRole} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.
     
-    Interviewer: That's great! Can you tell me about a time you faced a difficult challenge at work and how you handled it?
-    Candidate: In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.
+    Interviewer (Sarah): That's great! Can you tell me about a time you faced a difficult challenge at work and how you handled it?
+    Candidate (${candidateName}): In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.
     
-    Interviewer: Excellent example! How do you handle working with difficult team members or stakeholders?
-    Candidate: I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.
+    Interviewer (Sarah): Excellent example! How do you handle working with difficult team members or stakeholders?
+    Candidate (${candidateName}): I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.
     
-    Interviewer: What are your greatest strengths and how do they relate to this ${targetRole} position?
-    Candidate: I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this ${targetRole} position.
+    Interviewer (Sarah): What are your greatest strengths and how do they relate to this ${targetRole} position?
+    Candidate (${candidateName}): I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this ${targetRole} position.
     `;
 
     try {
@@ -557,6 +568,8 @@ INSTRUCTIONS:
 - Tailor all feedback specifically for the ${targetRole} role
 - Be specific about what ${candidateName} did well and what they can improve
 - Make recommendations specific to ${candidateName}'s performance and the ${targetRole} role
+- Extract ACTUAL answers from the transcript, not generic ones
+- Use the real conversation content to provide accurate feedback
 
 Please return ONLY a valid JSON object (no markdown formatting) with the following structure:
 {
@@ -568,8 +581,8 @@ Please return ONLY a valid JSON object (no markdown formatting) with the followi
   "posture": number (0-100),
   "answerAnalysis": [
     {
-      "question": "string",
-      "answer": "string", 
+      "question": "string (actual question from transcript)",
+      "answer": "string (actual answer from transcript)", 
       "feedback": "string (personalized for ${candidateName})",
       "score": number (0-100),
       "strengths": ["string"],
@@ -609,6 +622,9 @@ Provide realistic scores based on the actual content. Be constructive and specif
           analysisData.realMetrics = realMetrics;
           console.log('✅ Enhanced analysis with real conversation metrics');
         }
+        
+        // Add data source information
+        analysisData.dataSource = dataSource;
         
         console.log('✅ Interview analysis completed for session:', sessionId);
         
@@ -686,7 +702,8 @@ Provide realistic scores based on the actual content. Be constructive and specif
         "Maintain consistent eye contact throughout longer answers",
         "Prepare specific metrics and achievements to quantify your impact",
         `Research specific challenges in ${targetRole} roles to better connect your experience`
-      ]
+      ],
+      dataSource: 'fallback_personalized'
     };
     
     res.status(200).json({
