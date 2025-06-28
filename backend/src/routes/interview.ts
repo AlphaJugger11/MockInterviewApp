@@ -1,5 +1,5 @@
 import express from 'express';
-import { startInterview, createConversation, endConversation, analyzeInterview } from '../controllers/interviewController';
+import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback } from '../controllers/interviewController';
 import { validateInterviewRequest, validateConversationRequest } from '../middleware/validation';
 
 const router = express.Router();
@@ -12,6 +12,9 @@ router.post('/end-conversation', endConversation);
 
 // POST /api/interview/analyze - New endpoint for AI-powered analysis
 router.post('/analyze', analyzeInterview);
+
+// POST /api/interview/conversation-callback - Webhook for conversation transcripts
+router.post('/conversation-callback', conversationCallback);
 
 // POST /api/interview/start - Legacy endpoint
 router.post('/start', validateInterviewRequest, startInterview);

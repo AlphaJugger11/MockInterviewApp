@@ -20,6 +20,11 @@ const Interview = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const sessionStartTimeRef = useRef<number>(Date.now());
 
+  // Conversation capture refs
+  const dailyCallRef = useRef<any>(null);
+  const conversationTranscriptRef = useRef<any[]>([]);
+  const speechMetricsRef = useRef<any>({});
+
   useEffect(() => {
     // Get the conversation data from localStorage
     const url = localStorage.getItem('conversationUrl');
@@ -128,6 +133,9 @@ const Interview = () => {
         sessionStartTimeRef.current = Date.now();
         console.log('Recording started with format:', selectedMimeType);
 
+        // Initialize Daily.co conversation capture
+        initializeDailyCapture(url);
+
       } catch (err) {
         console.error("Failed to get user media:", err);
         setError("Failed to access camera and microphone. Please check your permissions and try again.");
@@ -146,6 +154,94 @@ const Interview = () => {
       clearInterval(timer);
     };
   }, [navigate]);
+
+  // Initialize Daily.co conversation capture
+  const initializeDailyCapture = (conversationUrl: string) => {
+    try {
+      // Load Daily.co script if not already loaded
+      if (!window.Daily) {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/@daily-co/daily-js';
+        script.onload = () => setupDailyCapture(conversationUrl);
+        document.head.appendChild(script);
+      } else {
+        setupDailyCapture(conversationUrl);
+      }
+    } catch (error) {
+      console.error('Error initializing Daily capture:', error);
+    }
+  };
+
+  // Setup Daily.co conversation capture
+  const setupDailyCapture = (conversationUrl: string) => {
+    try {
+      // Create Daily call instance for capturing conversation data
+      const call = window.Daily.createFrame({
+        showLeaveButton: false,
+        showFullscreenButton: false,
+        showLocalVideo: false,
+        showParticipantsBar: false,
+        iframeStyle: { display: 'none' } // Hidden frame just for data capture
+      });
+
+      dailyCallRef.current = call;
+
+      // Capture conversation events
+      call.on('app-message', (event: any) => {
+        console.log('📝 Conversation event captured:', event);
+        
+        // Store conversation data
+        const conversationEvent = {
+          timestamp: new Date().toISOString(),
+          type: event.data?.type || 'message',
+          content: event.data?.content || event.data,
+          participant: event.fromId,
+          sessionId: conversationId
+        };
+        
+        conversationTranscriptRef.current.push(conversationEvent);
+        
+        // Store in localStorage for persistence
+        const existingTranscript = JSON.parse(localStorage.getItem(`transcript_${conversationId}`) || '[]');
+        existingTranscript.push(conversationEvent);
+        localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(existingTranscript));
+        
+        console.log('💾 Conversation data stored:', conversationEvent);
+      });
+
+      // Capture speech metrics and analysis
+      call.on('participant-updated', (event: any) => {
+        if (event.participant?.audio_level !== undefined) {
+          speechMetricsRef.current.audioLevel = event.participant.audio_level;
+        }
+        
+        // Store speech metrics
+        const metrics = {
+          timestamp: new Date().toISOString(),
+          audioLevel: event.participant?.audio_level,
+          speaking: event.participant?.audio_level > 0.1,
+          sessionId: conversationId
+        };
+        
+        const existingMetrics = JSON.parse(localStorage.getItem(`metrics_${conversationId}`) || '[]');
+        existingMetrics.push(metrics);
+        localStorage.setItem(`metrics_${conversationId}`, JSON.stringify(existingMetrics));
+      });
+
+      // Join the conversation for data capture (audio/video disabled)
+      call.join({ 
+        url: conversationUrl,
+        userName: `${userName}_DataCapture`,
+        startVideoOff: true,
+        startAudioOff: true
+      });
+
+      console.log('✅ Daily conversation capture initialized');
+
+    } catch (error) {
+      console.error('Error setting up Daily capture:', error);
+    }
+  };
 
   // Enhanced function to create and download recording
   const triggerDownload = async () => {
@@ -181,6 +277,21 @@ const Interview = () => {
       });
       
       console.log('Created blob with size:', blob.size, 'bytes');
+
+      // Store video blob in localStorage for later viewing
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result as string;
+        localStorage.setItem(`recording_${conversationId}`, base64Data);
+        localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
+          size: blob.size,
+          type: blob.type,
+          duration: sessionDuration,
+          timestamp: new Date().toISOString()
+        }));
+        console.log('📹 Recording stored in localStorage');
+      };
+      reader.readAsDataURL(blob);
 
       // Create download link
       const url = URL.createObjectURL(blob);
@@ -220,10 +331,40 @@ const Interview = () => {
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
       
-      // Step 2: Trigger download
+      // Step 2: Capture final conversation data
+      if (dailyCallRef.current) {
+        try {
+          // Get final conversation state
+          const finalTranscript = conversationTranscriptRef.current;
+          const finalMetrics = speechMetricsRef.current;
+          
+          // Store final session data
+          const sessionData = {
+            conversationId,
+            transcript: finalTranscript,
+            metrics: finalMetrics,
+            duration: sessionDuration,
+            endTime: new Date().toISOString(),
+            userName,
+            jobTitle: localStorage.getItem('jobTitle'),
+            company: localStorage.getItem('company')
+          };
+          
+          localStorage.setItem(`session_${conversationId}`, JSON.stringify(sessionData));
+          console.log('📊 Final session data stored');
+          
+          // Leave Daily call
+          dailyCallRef.current.leave();
+          dailyCallRef.current.destroy();
+        } catch (dailyError) {
+          console.warn('Error cleaning up Daily call:', dailyError);
+        }
+      }
+      
+      // Step 3: Trigger download
       await triggerDownload();
       
-      // Step 3: Stop all media tracks IMMEDIATELY (turn off camera light)
+      // Step 4: Stop all media tracks IMMEDIATELY (turn off camera light)
       if (streamRef.current) {
         console.log('Stopping all media tracks...');
         streamRef.current.getTracks().forEach(track => {
@@ -239,7 +380,7 @@ const Interview = () => {
         console.log('✅ Camera and microphone disconnected');
       }
       
-      // Step 4: End conversation on backend to stop credit usage and cleanup persona
+      // Step 5: End conversation on backend to stop credit usage and cleanup persona
       if (conversationId) {
         try {
           console.log('Ending conversation and cleaning up persona on backend...');
@@ -263,12 +404,12 @@ const Interview = () => {
         }
       }
       
-      // Step 5: Store session completion data
+      // Step 6: Store session completion data
       localStorage.setItem('sessionCompleted', 'true');
       localStorage.setItem('sessionEndTime', new Date().toISOString());
       localStorage.setItem('sessionDuration', sessionDuration.toString());
       
-      // Step 6: Navigate to feedback page
+      // Step 7: Navigate to feedback page
       console.log('Navigating to feedback page...');
       navigate('/feedback/1');
       
@@ -293,6 +434,16 @@ const Interview = () => {
       // Stop all tracks immediately
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      // Cleanup Daily call
+      if (dailyCallRef.current) {
+        try {
+          dailyCallRef.current.leave();
+          dailyCallRef.current.destroy();
+        } catch (error) {
+          console.warn('Error cleaning up Daily call on unload:', error);
+        }
       }
       
       // Use sendBeacon for reliable cleanup on tab close
@@ -325,6 +476,14 @@ const Interview = () => {
       // Also cleanup on component unmount
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (dailyCallRef.current) {
+        try {
+          dailyCallRef.current.leave();
+          dailyCallRef.current.destroy();
+        } catch (error) {
+          console.warn('Error cleaning up Daily call on unmount:', error);
+        }
       }
     };
   }, [conversationId, dynamicPersonaId]);
@@ -516,6 +675,12 @@ const Interview = () => {
                   <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera:</span>
                   <span className="text-green-500 font-medium">
                     {streamRef.current ? 'Active' : 'Disconnected'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Transcript:</span>
+                  <span className="text-blue-500 font-medium">
+                    {conversationTranscriptRef.current.length} events
                   </span>
                 </div>
                 {dynamicPersonaId && (

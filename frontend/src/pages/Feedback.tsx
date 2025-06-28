@@ -20,6 +20,7 @@ interface AnalysisData {
   }>;
   summary: string;
   recommendations: string[];
+  realMetrics?: any;
 }
 
 const Feedback = () => {
@@ -28,12 +29,14 @@ const Feedback = () => {
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
 
   // Get session data from localStorage
   const sessionData = {
     role: localStorage.getItem('jobTitle') || 'Senior Frontend Developer',
     company: localStorage.getItem('company') || 'Netflix',
     userName: localStorage.getItem('userName') || 'User',
+    conversationId: localStorage.getItem('conversationId'),
     date: new Date().toISOString().split('T')[0],
     duration: localStorage.getItem('sessionDuration') ? 
       `${Math.floor(parseInt(localStorage.getItem('sessionDuration')!) / 60)} min` : '45 min',
@@ -52,42 +55,51 @@ const Feedback = () => {
       try {
         setLoading(true);
         
-        // Create a realistic transcript based on the session data
-        const mockTranscript = `
-        Interviewer: Hello ${sessionData.userName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${sessionData.role} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience.
+        // Get stored conversation transcript and metrics
+        const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
+        const storedMetrics = localStorage.getItem(`metrics_${sessionData.conversationId}`);
+        const storedSession = localStorage.getItem(`session_${sessionData.conversationId}`);
         
-        Interviewer: Let's begin with: Tell me about yourself and why you're interested in this ${sessionData.role} role.
-        Candidate: Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this ${sessionData.role} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.
+        let realTranscript = null;
+        let realMetrics = null;
         
-        Interviewer: That's great! Can you tell me about a time you faced a difficult challenge at work and how you handled it?
-        Candidate: In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.
+        if (storedTranscript) {
+          const transcriptData = JSON.parse(storedTranscript);
+          // Convert transcript events to readable format
+          realTranscript = transcriptData.map((event: any) => 
+            `${event.participant === 'ai' ? 'Interviewer' : 'Candidate'}: ${event.content}`
+          ).join('\n\n');
+          console.log('✅ Using stored conversation transcript');
+        }
         
-        Interviewer: Excellent example! How do you handle working with difficult team members or stakeholders?
-        Candidate: I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.
+        if (storedMetrics) {
+          realMetrics = JSON.parse(storedMetrics);
+          console.log('✅ Using stored conversation metrics');
+        }
         
-        Interviewer: What are your greatest strengths and how do they relate to this ${sessionData.role} position?
-        Candidate: I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this ${sessionData.role} position.
-        `;
+        if (storedSession) {
+          const sessionInfo = JSON.parse(storedSession);
+          console.log('✅ Using stored session data:', sessionInfo);
+        }
         
-        // Call the analyze endpoint with realistic data
+        // Call the analyze endpoint with real conversation data
         const response = await fetch('http://localhost:3001/api/interview/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId: id,
-            transcript: mockTranscript,
-            answers: [
-              "I'm a passionate professional with experience in my field, interested in this role because it aligns with my career goals.",
-              "I reorganized the team when a key member left, redistributed tasks, and delivered the project on time through clear communication.",
-              "I believe in open communication and finding common ground when working with difficult colleagues.",
-              "My greatest strengths are analytical thinking, attention to detail, and working well under pressure."
-            ]
+            conversationId: sessionData.conversationId,
+            transcript: realTranscript,
+            jobTitle: sessionData.role,
+            userName: sessionData.userName,
+            answers: realTranscript ? realTranscript.split('Candidate:').slice(1) : []
           }),
         });
 
         if (response.ok) {
           const data = await response.json();
           setAnalysisData(data.analysis);
+          console.log('✅ Analysis data source:', data.dataSource);
         } else {
           throw new Error('Failed to fetch analysis');
         }
@@ -106,7 +118,7 @@ const Feedback = () => {
           answerAnalysis: [
             {
               question: `Tell me about yourself and why you're interested in this ${sessionData.role} role.`,
-              answer: "I'm a passionate professional with several years of experience in my field. I'm particularly interested in this position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.",
+              answer: "Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.",
               feedback: "Good professional tone and enthusiasm. The answer shows clear interest but could be more specific about relevant experience and unique value proposition.",
               score: 82,
               strengths: ["Professional demeanor", "Shows enthusiasm", "Clear communication", "Positive attitude"],
@@ -152,8 +164,18 @@ const Feedback = () => {
       }
     };
 
+    // Load stored recording if available
+    const loadStoredRecording = () => {
+      const storedRecording = localStorage.getItem(`recording_${sessionData.conversationId}`);
+      if (storedRecording) {
+        setRecordingUrl(storedRecording);
+        console.log('✅ Loaded stored recording from localStorage');
+      }
+    };
+
     fetchAnalysis();
-  }, [id, sessionData.role, sessionData.userName]);
+    loadStoredRecording();
+  }, [id, sessionData.role, sessionData.userName, sessionData.conversationId]);
 
   const renderCircularProgress = (value: number, size: 'small' | 'large' = 'large') => {
     const radius = size === 'large' ? 15.9155 : 12;
@@ -224,16 +246,37 @@ const Feedback = () => {
                 Session Recording
               </h3>
               <div className="bg-black rounded-lg aspect-video flex items-center justify-center mb-4">
-                <div className="text-center">
-                  <Play className="h-16 w-16 text-white/50 mx-auto mb-4" />
-                  <p className="text-white/70">Interview Recording</p>
-                  <p className="text-white/50 text-sm mt-2">
-                    {sessionData.sessionCompleted ? 'Recording completed and downloaded' : 'Recording in progress'}
-                  </p>
-                  <button className="mt-4 px-6 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors">
-                    {sessionData.sessionCompleted ? 'View Downloaded File' : 'Download Recording'}
-                  </button>
-                </div>
+                {recordingUrl ? (
+                  <video 
+                    controls 
+                    className="w-full h-full rounded-lg"
+                    src={recordingUrl}
+                  >
+                    Your browser does not support the video tag.
+                  </video>
+                ) : (
+                  <div className="text-center">
+                    <Play className="h-16 w-16 text-white/50 mx-auto mb-4" />
+                    <p className="text-white/70">Interview Recording</p>
+                    <p className="text-white/50 text-sm mt-2">
+                      {sessionData.sessionCompleted ? 'Recording completed and stored locally' : 'Recording in progress'}
+                    </p>
+                    <button 
+                      onClick={() => {
+                        const storedRecording = localStorage.getItem(`recording_${sessionData.conversationId}`);
+                        if (storedRecording) {
+                          const link = document.createElement('a');
+                          link.href = storedRecording;
+                          link.download = `interview-recording-${sessionData.conversationId}.webm`;
+                          link.click();
+                        }
+                      }}
+                      className="mt-4 px-6 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors"
+                    >
+                      {recordingUrl ? 'Download Recording' : 'No Recording Available'}
+                    </button>
+                  </div>
+                )}
               </div>
               <button className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity">
                 <Share2 className="h-4 w-4 mr-2" />
@@ -248,6 +291,14 @@ const Feedback = () => {
               <p className="font-inter text-light-text-primary dark:text-dark-text-primary leading-relaxed mb-4">
                 {analysisData.summary}
               </p>
+              
+              {analysisData.realMetrics && (
+                <div className="mb-4 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                  <p className="text-green-600 dark:text-green-400 text-sm font-medium">
+                    ✅ This analysis includes real conversation data and metrics from your interview session
+                  </p>
+                </div>
+              )}
               
               <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">Key Recommendations:</h4>
               <ul className="list-disc list-inside space-y-1">
@@ -340,6 +391,11 @@ const Feedback = () => {
                 <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary text-sm">
                   {metric.description}
                 </p>
+                {analysisData.realMetrics && (
+                  <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                    ✅ Real data
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -362,6 +418,11 @@ const Feedback = () => {
                 <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
                   {metric.description}
                 </p>
+                {analysisData.realMetrics && (
+                  <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                    ✅ Real data
+                  </p>
+                )}
               </div>
             ))}
           </div>

@@ -151,6 +151,7 @@ IMPORTANT REMINDERS:
         {
           replica_id: TAVUS_REPLICA_ID,
           conversational_context: conversationalContext, // Use conversational context for immediate application
+          callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`, // Add callback for transcript
           properties: {
             max_call_duration: 1200, // 20 minutes max call duration
             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
@@ -243,6 +244,7 @@ IMPORTANT REMINDERS:
           {
             replica_id: TAVUS_REPLICA_ID,
             persona_id: dynamicPersonaId,
+            callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`,
             properties: {
               max_call_duration: 1200,
               participant_absent_timeout: 300,
@@ -320,6 +322,42 @@ IMPORTANT REMINDERS:
   }
 };
 
+// New webhook endpoint to receive conversation transcripts
+export const conversationCallback = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { event_type, properties } = req.body;
+    
+    console.log('📞 Received conversation callback:', { event_type, properties });
+    
+    if (event_type === 'application.transcription_ready') {
+      const { conversation_id, transcript } = properties;
+      
+      console.log('📝 Transcript ready for conversation:', conversation_id);
+      console.log('📄 Transcript content:', transcript);
+      
+      // Store transcript for later analysis
+      // In a real app, you'd store this in a database
+      // For now, we'll just log it and make it available for analysis
+      
+      // You could also trigger real-time analysis here
+      // await analyzeConversationTranscript(conversation_id, transcript);
+    }
+    
+    res.status(200).json({ success: true, message: 'Callback received' });
+    
+  } catch (error) {
+    console.error('❌ Error in conversation callback:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+};
+
 // Enhanced function to end conversation and cleanup dynamic persona
 export const endConversation = async (
   req: Request,
@@ -349,7 +387,30 @@ export const endConversation = async (
 
     console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId });
 
-    // Step 1: End the conversation
+    // Step 1: Get conversation data before ending it
+    try {
+      const conversationDataResponse = await axios.get(
+        `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+        {
+          headers: { 
+            'x-api-key': TAVUS_API_KEY,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      );
+      
+      const conversationData = conversationDataResponse.data;
+      console.log('📊 Retrieved conversation data:', conversationData);
+      
+      // Store conversation data for analysis
+      // In a real app, you'd store this in a database
+      
+    } catch (dataError) {
+      console.warn('⚠️ Error retrieving conversation data:', dataError);
+    }
+
+    // Step 2: End the conversation
     try {
       await axios.delete(
         `https://tavusapi.com/v2/conversations/${conversationId}`,
@@ -366,7 +427,7 @@ export const endConversation = async (
       console.warn('⚠️ Error ending conversation on Tavus (may already be ended):', deleteError);
     }
 
-    // Step 2: Clean up the dynamic persona if it exists
+    // Step 3: Clean up the dynamic persona if it exists
     if (dynamicPersonaId) {
       try {
         await axios.delete(
@@ -399,14 +460,14 @@ export const endConversation = async (
   }
 };
 
-// Enhanced function to analyze interview and generate feedback using Gemini
+// Enhanced function to analyze interview and generate feedback using real conversation data
 export const analyzeInterview = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { sessionId, transcript, answers } = req.body;
+    const { sessionId, transcript, answers, conversationId } = req.body;
     
     if (!sessionId) {
       res.status(400).json({
@@ -418,26 +479,59 @@ export const analyzeInterview = async (
 
     console.log("🔍 Analyzing interview session:", sessionId);
 
-    // Get session data from localStorage or use defaults
-    const jobTitle = req.body.jobTitle || 'Professional';
-    const userName = req.body.userName || 'Candidate';
+    // Get session data from request or use defaults
+    const jobTitle = req.body.jobTitle || localStorage?.getItem?.('jobTitle') || 'Professional';
+    const userName = req.body.userName || localStorage?.getItem?.('userName') || 'Candidate';
 
-    // If no transcript provided, use a realistic mock based on the session data
-    const analysisTranscript = transcript || `
-    Interviewer: Hello ${userName}! I'm Sarah, your AI interview coach. Please ensure your camera and microphone are on. Tell me about yourself and why you're interested in this ${jobTitle} position.
+    // Try to get real conversation data if conversationId is provided
+    let realTranscript = transcript;
+    let realMetrics = {};
     
-    Candidate: Thank you for having me, Sarah. I'm a dedicated professional with experience in my field. I'm interested in this ${jobTitle} role because it aligns with my career goals and I believe I can contribute meaningfully to the team.
+    if (conversationId) {
+      try {
+        const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
+        const conversationDataResponse = await axios.get(
+          `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+          {
+            headers: { 
+              'x-api-key': TAVUS_API_KEY,
+              'Content-Type': 'application/json'
+            },
+            timeout: 10000
+          }
+        );
+        
+        const conversationData = conversationDataResponse.data;
+        
+        if (conversationData.transcript) {
+          realTranscript = conversationData.transcript;
+          console.log('✅ Using real conversation transcript');
+        }
+        
+        if (conversationData.perception_analysis) {
+          realMetrics = conversationData.perception_analysis;
+          console.log('✅ Using real perception analysis');
+        }
+        
+      } catch (apiError) {
+        console.warn('⚠️ Could not retrieve real conversation data, using provided data');
+      }
+    }
+
+    // If no real transcript, use a realistic mock based on the session data
+    const analysisTranscript = realTranscript || `
+    Interviewer: Hello ${userName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${jobTitle} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience.
+    
+    Interviewer: Let's begin with: Tell me about yourself and why you're interested in this ${jobTitle} role.
+    Candidate: Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this ${jobTitle} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.
     
     Interviewer: That's great! Can you tell me about a time you faced a difficult challenge at work and how you handled it?
+    Candidate: In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.
     
-    Candidate: In my previous role, I encountered a project with a tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and take on additional responsibilities. Through clear communication and extra effort, we delivered the project on time.
-    
-    Interviewer: Excellent example! How do you handle working with difficult team members?
-    
-    Candidate: I believe in open communication and understanding different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.
+    Interviewer: Excellent example! How do you handle working with difficult team members or stakeholders?
+    Candidate: I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.
     
     Interviewer: What are your greatest strengths and how do they relate to this ${jobTitle} position?
-    
     Candidate: I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this ${jobTitle} position.
     `;
 
@@ -446,6 +540,8 @@ export const analyzeInterview = async (
       
       const analysisPrompt = `You are an expert interview evaluator. Analyze the following interview transcript and provide a comprehensive evaluation.
 
+Candidate Name: ${userName}
+Job Title: ${jobTitle}
 Transcript: ${analysisTranscript}
 
 Please return ONLY a valid JSON object (no markdown formatting) with the following structure:
@@ -466,11 +562,11 @@ Please return ONLY a valid JSON object (no markdown formatting) with the followi
       "areasForImprovement": ["string"]
     }
   ],
-  "summary": "string",
+  "summary": "string (personalized summary mentioning ${userName} and ${jobTitle})",
   "recommendations": ["string"]
 }
 
-Provide realistic scores based on the content. Be constructive and specific in feedback. Focus on communication skills, answer structure, and professional presentation. Return ONLY the JSON object without any markdown formatting.`;
+Provide realistic scores based on the actual content. Be constructive and specific in feedback. Focus on communication skills, answer structure, and professional presentation. Make sure to personalize the feedback for ${userName} applying for the ${jobTitle} role. Return ONLY the JSON object without any markdown formatting.`;
 
       const result = await model.generateContent(analysisPrompt);
       const response = await result.response;
@@ -494,13 +590,21 @@ Provide realistic scores based on the content. Be constructive and specific in f
         
         const analysisData = JSON.parse(cleanedText);
         
+        // Enhance with real metrics if available
+        if (realMetrics && Object.keys(realMetrics).length > 0) {
+          // Merge real metrics with AI analysis
+          analysisData.realMetrics = realMetrics;
+          console.log('✅ Enhanced analysis with real conversation metrics');
+        }
+        
         console.log('✅ Interview analysis completed for session:', sessionId);
         
         res.status(200).json({
           success: true,
           sessionId,
           analysis: analysisData,
-          message: 'Interview analysis completed successfully'
+          message: 'Interview analysis completed successfully',
+          dataSource: realTranscript ? 'real_conversation' : 'mock_data'
         });
         
       } catch (parseError) {
@@ -526,37 +630,46 @@ Provide realistic scores based on the content. Be constructive and specific in f
       posture: 85,
       answerAnalysis: [
         {
-          question: "Tell me about yourself and why you're interested in this position.",
-          answer: "Thank you for having me, Sarah. I'm a dedicated professional with experience in my field. I'm interested in this role because it aligns with my career goals and I believe I can contribute meaningfully to the team.",
-          feedback: "Good professional tone and enthusiasm. The answer shows interest but could be more specific about relevant experience and what unique value you bring to the role.",
+          question: `Tell me about yourself and why you're interested in this ${req.body.jobTitle || 'position'}.`,
+          answer: "Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.",
+          feedback: "Good professional tone and enthusiasm. The answer shows clear interest but could be more specific about relevant experience and unique value proposition.",
           score: 82,
           strengths: ["Professional demeanor", "Shows enthusiasm", "Clear communication", "Positive attitude"],
           areasForImprovement: ["Be more specific about relevant experience", "Highlight unique value proposition", "Include specific examples of achievements"]
         },
         {
           question: "Tell me about a time you faced a difficult challenge at work and how you handled it.",
-          answer: "In my previous role, I encountered a project with a tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and take on additional responsibilities. Through clear communication and extra effort, we delivered the project on time.",
-          feedback: "Excellent use of STAR method structure. Shows leadership, adaptability, and problem-solving skills. Strong example of handling unexpected challenges.",
+          answer: "In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.",
+          feedback: "Excellent use of STAR method structure. Shows strong leadership, adaptability, and problem-solving skills under pressure.",
           score: 88,
-          strengths: ["Clear STAR method structure", "Demonstrates leadership", "Shows adaptability", "Quantified outcome (on time delivery)"],
-          areasForImprovement: ["Could mention specific communication strategies used", "Include metrics about team size or project scope", "Describe lessons learned"]
+          strengths: ["Clear STAR method structure", "Demonstrates leadership", "Shows adaptability", "Quantified outcome (on time delivery)", "Mentions quality maintenance"],
+          areasForImprovement: ["Could mention specific communication strategies used", "Include metrics about team size or project scope", "Describe lessons learned for future situations"]
         },
         {
-          question: "How do you handle working with difficult team members?",
-          answer: "I believe in open communication and understanding different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.",
-          feedback: "Great demonstration of emotional intelligence and conflict resolution approach. Shows maturity and professional mindset.",
+          question: "How do you handle working with difficult team members or stakeholders?",
+          answer: "I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.",
+          feedback: "Great demonstration of emotional intelligence and mature conflict resolution approach. Shows professional mindset and solution-oriented thinking.",
           score: 85,
-          strengths: ["Shows emotional intelligence", "Focus on solutions", "Professional approach", "Emphasizes common goals"],
-          areasForImprovement: ["Provide a specific example", "Mention techniques for finding common ground", "Describe measurable outcomes"]
+          strengths: ["Shows emotional intelligence", "Focus on solutions", "Professional approach", "Emphasizes common goals", "Mature perspective"],
+          areasForImprovement: ["Provide a specific example", "Mention specific techniques for finding common ground", "Describe measurable outcomes from conflict resolution"]
+        },
+        {
+          question: `What are your greatest strengths and how do they relate to this ${req.body.jobTitle || 'position'}?`,
+          answer: "I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this position.",
+          feedback: "Good identification of relevant strengths. The connection to the role is clear, though could be strengthened with specific examples.",
+          score: 80,
+          strengths: ["Relevant strengths identified", "Clear connection to role", "Confident delivery", "Practical focus"],
+          areasForImprovement: ["Provide specific examples of these strengths in action", "Quantify achievements that demonstrate these strengths", "Explain how these strengths solve specific challenges in the target role"]
         }
       ],
-      summary: "Strong overall performance with good communication skills and professional presentation. Demonstrated excellent use of the STAR method and showed emotional intelligence in handling workplace challenges. The candidate shows enthusiasm and has a solution-oriented mindset. Areas for improvement include providing more specific examples and quantifying achievements.",
+      summary: `Strong overall performance with good communication skills and professional presentation. ${req.body.userName || 'The candidate'} demonstrated excellent use of the STAR method and showed emotional intelligence in handling workplace challenges. The candidate shows genuine enthusiasm for the ${req.body.jobTitle || 'role'} and has a solution-oriented mindset. Areas for improvement include providing more specific examples and quantifying achievements to strengthen impact.`,
       recommendations: [
         "Practice providing more specific examples with measurable outcomes",
         "Prepare 2-3 detailed STAR method stories for different competencies",
         "Work on reducing minor filler words during responses",
         "Maintain consistent eye contact throughout longer answers",
-        "Prepare specific metrics and achievements to quantify your impact"
+        "Prepare specific metrics and achievements to quantify your impact",
+        `Research specific challenges in ${req.body.jobTitle || 'your target'} roles to better connect your experience`
       ]
     };
     
@@ -565,7 +678,8 @@ Provide realistic scores based on the content. Be constructive and specific in f
       sessionId,
       analysis: fallbackAnalysis,
       message: 'Interview analysis completed with enhanced realistic data',
-      note: 'AI analysis used enhanced fallback data based on common interview patterns'
+      note: 'AI analysis used enhanced fallback data based on common interview patterns',
+      dataSource: 'fallback_data'
     });
   }
 };
