@@ -344,7 +344,7 @@ const Interview = () => {
       
       <div className="max-w-6xl mx-auto p-8">
         <div className="grid lg:grid-cols-3 gap-8 h-full">
-          {/* Main AI Interviewer Area - Now the large area */}
+          {/* Main AI Interviewer Area - Large area (2/3 of screen) */}
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
@@ -376,9 +376,9 @@ const Interview = () => {
             </div>
           </div>
 
-          {/* Sidebar with User Video and Controls */}
+          {/* Sidebar with User Video and Controls (1/3 of screen) */}
           <div className="space-y-6">
-            {/* User Video Preview - Now in sidebar */}
+            {/* User Video Preview - In sidebar */}
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
                 Your Video

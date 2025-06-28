@@ -48,13 +48,22 @@ const Feedback = () => {
       try {
         setLoading(true);
         
-        // Simulate API call to analyze interview
+        // Create a mock transcript for analysis
+        const mockTranscript = `
+        Interviewer: Tell me about a time you faced a difficult challenge at work.
+        Candidate: I was leading a project with a tight deadline when our main developer left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional coding responsibilities. Through clear communication and extra hours, we delivered the project on time and maintained quality standards.
+        
+        Interviewer: Describe a situation where you had to work with a difficult team member.
+        Candidate: In my previous role, I worked with a colleague who was resistant to feedback and often missed deadlines. I approached them privately to understand their concerns and discovered they were overwhelmed with their workload. I helped them prioritize tasks and offered support, which improved our working relationship and team productivity.
+        `;
+        
+        // Call the analyze endpoint
         const response = await fetch('http://localhost:3001/api/interview/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId: id,
-            transcript: "Mock interview transcript for analysis",
+            transcript: mockTranscript,
             answers: ["Sample answer 1", "Sample answer 2"]
           }),
         });
@@ -151,7 +160,7 @@ const Feedback = () => {
         <div className="flex items-center justify-center py-12">
           <div className="text-center">
             <div className="w-8 h-8 border-4 border-light-accent dark:border-dark-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-light-text-secondary dark:text-dark-text-secondary">Loading analysis...</p>
+            <p className="text-light-text-secondary dark:text-dark-text-secondary">Analyzing interview with AI...</p>
           </div>
         </div>
       );

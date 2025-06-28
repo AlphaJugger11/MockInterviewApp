@@ -33,7 +33,7 @@ Make the interviewer persona professional, encouraging, and thorough in their ev
   }
 };
 
-// Enhanced controller function for creating conversations
+// Enhanced controller function for creating conversations with correct Tavus API implementation
 export const createConversation = async (
   req: Request,
   res: Response,
@@ -95,12 +95,37 @@ export const createConversation = async (
 
     console.log("Final persona instructions length:", persona_instructions.length);
 
-    // Step 4: Call Tavus API to create conversation
+    // Step 4: Create a temporary persona using the correct Tavus API
+    console.log("Creating temporary persona...");
+    const personaResponse = await axios.post(
+      'https://tavusapi.com/v2/personas',
+      {
+        name: `Dynamic Persona - ${jobTitle}`,
+        instructions: persona_instructions
+      },
+      {
+        headers: { 
+          'x-api-key': TAVUS_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000 
+      }
+    );
+    
+    const { persona_id } = personaResponse.data;
+    
+    if (!persona_id) {
+      throw new Error('No persona ID received from Tavus API');
+    }
+    
+    console.log('✅ Persona created successfully. ID:', persona_id);
+
+    // Step 5: Call Tavus API to create conversation with the correct persona_id parameter
     const conversationResponse = await axios.post(
       'https://tavusapi.com/v2/conversations',
       {
         replica_id: TAVUS_REPLICA_ID,
-        conversational_context: persona_instructions,
+        persona_id: persona_id, // Using the correct parameter name
         properties: {
           max_call_duration: 1200, // 20 minutes max call duration
           participant_absent_timeout: 300, // 5 minutes timeout for participant absence
@@ -137,6 +162,7 @@ export const createConversation = async (
     if (axios.isAxiosError(error)) {
       const status = error.response?.status || 500;
       const message = error.response?.data?.message || error.response?.data?.error || 'External API Error';
+      console.error('Tavus API Error Details:', error.response?.data);
       res.status(status).json({
         success: false,
         error: `Tavus API Error: ${message}`
@@ -150,7 +176,7 @@ export const createConversation = async (
   }
 };
 
-// New function to end conversation and stop credit usage
+// Function to end conversation and stop credit usage
 export const endConversation = async (
   req: Request,
   res: Response,
@@ -217,7 +243,7 @@ export const endConversation = async (
   }
 };
 
-// New function to analyze interview and generate feedback
+// Function to analyze interview and generate feedback
 export const analyzeInterview = async (
   req: Request,
   res: Response,
