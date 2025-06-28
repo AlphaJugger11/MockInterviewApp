@@ -348,7 +348,7 @@ const Interview = () => {
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-                AI Interviewer
+                AI Interviewer - Sarah
               </h3>
               
               {conversationUrl ? (
@@ -362,7 +362,7 @@ const Interview = () => {
                     />
                   </div>
                   <p className="text-center text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                    Your AI interviewer Sarah is ready to begin with {userName}
+                    Your AI interviewer Sarah is conducting the interview with {userName}
                   </p>
                 </div>
               ) : (

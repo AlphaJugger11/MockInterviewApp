@@ -11,8 +11,6 @@ interface InterviewStartRequest {
 interface ConversationRequest {
   jobTitle: string;
   userName: string;
-  customInstructions?: string;
-  customCriteria?: string;
 }
 
 export const validateConversationRequest = (
@@ -20,7 +18,7 @@ export const validateConversationRequest = (
   res: Response,
   next: NextFunction
 ): void => {
-  const { jobTitle, userName, customInstructions, customCriteria } = req.body;
+  const { jobTitle, userName } = req.body;
 
   // Validate required fields
   if (!jobTitle || typeof jobTitle !== 'string' || jobTitle.trim().length === 0) {
@@ -53,24 +51,6 @@ export const validateConversationRequest = (
     res.status(400).json({
       success: false,
       error: 'User name must be 50 characters or less',
-    });
-    return;
-  }
-
-  // Validate custom instructions length
-  if (customInstructions && customInstructions.length > 5000) {
-    res.status(400).json({
-      success: false,
-      error: 'Custom instructions must be 5000 characters or less',
-    });
-    return;
-  }
-
-  // Validate custom criteria length
-  if (customCriteria && customCriteria.length > 2000) {
-    res.status(400).json({
-      success: false,
-      error: 'Custom criteria must be 2000 characters or less',
     });
     return;
   }
