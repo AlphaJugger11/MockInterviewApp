@@ -10,6 +10,7 @@ const Interview = () => {
   const [error, setError] = useState<string | null>(null);
   const [sessionDuration, setSessionDuration] = useState(0);
   const [userName, setUserName] = useState<string>('');
+  const [recordingSize, setRecordingSize] = useState(0);
 
   // Recording refs and state
   const userVideoRef = useRef<HTMLVideoElement>(null);
@@ -40,11 +41,17 @@ const Interview = () => {
     const initializeMedia = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 1280, height: 720 }, 
+          video: { 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
+          }, 
           audio: { 
             echoCancellation: true,
             noiseSuppression: true,
-            sampleRate: 44100
+            autoGainControl: true,
+            sampleRate: 48000,
+            channelCount: 2
           } 
         });
         
@@ -54,22 +61,34 @@ const Interview = () => {
           userVideoRef.current.srcObject = stream;
         }
 
-        // Check if MediaRecorder supports the desired format
-        let mimeType = 'video/webm;codecs=vp9,opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm;codecs=vp8,opus';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm';
+        // Check supported MIME types in order of preference
+        const mimeTypes = [
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus', 
+          'video/webm;codecs=h264,opus',
+          'video/webm',
+          'video/mp4'
+        ];
+
+        let selectedMimeType = '';
+        for (const mimeType of mimeTypes) {
+          if (MediaRecorder.isTypeSupported(mimeType)) {
+            selectedMimeType = mimeType;
+            break;
           }
         }
 
-        console.log('Using MIME type:', mimeType);
+        if (!selectedMimeType) {
+          throw new Error('No supported video recording format found');
+        }
 
-        // Initialize MediaRecorder
+        console.log('Using MIME type:', selectedMimeType);
+
+        // Initialize MediaRecorder with optimal settings
         const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: mimeType,
-          videoBitsPerSecond: 2500000, // 2.5 Mbps
-          audioBitsPerSecond: 128000   // 128 kbps
+          mimeType: selectedMimeType,
+          videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+          audioBitsPerSecond: 128000   // 128 kbps for clear audio
         });
         
         mediaRecorderRef.current = mediaRecorder;
@@ -77,27 +96,38 @@ const Interview = () => {
 
         // Handle data available event
         mediaRecorder.ondataavailable = (event) => {
-          console.log('Data available:', event.data.size, 'bytes');
-          if (event.data.size > 0) {
+          console.log('Data chunk received:', event.data.size, 'bytes');
+          if (event.data && event.data.size > 0) {
             recordedChunksRef.current.push(event.data);
+            // Update recording size for monitoring
+            const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
+            setRecordingSize(totalSize);
           }
         };
 
         // Handle recording stop
         mediaRecorder.onstop = () => {
+          const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
           console.log('Recording stopped. Total chunks:', recordedChunksRef.current.length);
-          console.log('Total size:', recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0), 'bytes');
+          console.log('Total recording size:', totalSize, 'bytes');
+          setRecordingSize(totalSize);
         };
 
-        // Start recording with smaller time slices for better data capture
-        mediaRecorder.start(100); // Record in 100ms chunks for better reliability
+        // Handle errors
+        mediaRecorder.onerror = (event) => {
+          console.error('MediaRecorder error:', event);
+          setError('Recording error occurred. Please try again.');
+        };
+
+        // Start recording with frequent data capture for reliability
+        mediaRecorder.start(1000); // Capture data every 1 second
         setIsRecording(true);
         sessionStartTimeRef.current = Date.now();
-        console.log('Recording started with format:', mimeType);
+        console.log('Recording started with format:', selectedMimeType);
 
       } catch (err) {
         console.error("Failed to get user media:", err);
-        setError("Failed to access camera and microphone. Please check your permissions.");
+        setError("Failed to access camera and microphone. Please check your permissions and try again.");
       }
     };
 
@@ -116,19 +146,30 @@ const Interview = () => {
 
   // Enhanced function to create and download recording
   const triggerDownload = async () => {
+    console.log('Triggering download...');
+    
     if (recordedChunksRef.current.length === 0) {
       console.log('No recorded data to download');
+      setError('No recording data available. Please ensure recording was active.');
       return;
     }
 
     try {
-      console.log('Creating download with', recordedChunksRef.current.length, 'chunks');
-      
-      // Stop recording if still active
+      // Stop recording if still active and wait for final data
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        console.log('Stopping active recording...');
         mediaRecorderRef.current.stop();
-        // Wait a bit for the final data to be available
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Wait for final data to be processed
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
+      console.log('Creating download with', recordedChunksRef.current.length, 'chunks, total size:', totalSize, 'bytes');
+      
+      if (totalSize === 0) {
+        console.error('Recording is empty');
+        setError('Recording is empty. Please try recording again.');
+        return;
       }
 
       // Create blob from recorded chunks
@@ -137,12 +178,6 @@ const Interview = () => {
       });
       
       console.log('Created blob with size:', blob.size, 'bytes');
-      
-      if (blob.size === 0) {
-        console.error('Blob is empty, cannot download');
-        setError('Recording is empty. Please try recording again.');
-        return;
-      }
 
       // Create download link
       const url = URL.createObjectURL(blob);
@@ -155,8 +190,10 @@ const Interview = () => {
       a.click();
       
       // Cleanup
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
       
       console.log('Download triggered successfully');
       
@@ -166,7 +203,7 @@ const Interview = () => {
     }
   };
 
-  // Enhanced session cleanup with proper order
+  // Enhanced session cleanup with proper order and error handling
   const handleEndSession = async () => {
     console.log('🛑 Ending interview session...');
     
@@ -176,8 +213,8 @@ const Interview = () => {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
         console.log('Recording stopped');
-        // Wait for final data
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Wait for final data to be processed
+        await new Promise(resolve => setTimeout(resolve, 1500));
       }
       
       // Step 2: Trigger download
@@ -185,6 +222,7 @@ const Interview = () => {
       
       // Step 3: Stop all media tracks IMMEDIATELY (turn off camera light)
       if (streamRef.current) {
+        console.log('Stopping all media tracks...');
         streamRef.current.getTracks().forEach(track => {
           track.stop();
           console.log(`Stopped ${track.kind} track`);
@@ -195,11 +233,13 @@ const Interview = () => {
         if (userVideoRef.current) {
           userVideoRef.current.srcObject = null;
         }
+        console.log('✅ Camera and microphone disconnected');
       }
       
       // Step 4: End conversation on backend to stop credit usage
       if (conversationId) {
         try {
+          console.log('Ending conversation on backend...');
           const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -213,26 +253,35 @@ const Interview = () => {
           }
         } catch (endError) {
           console.warn('⚠️ Error ending conversation on backend:', endError);
+          // Continue anyway since camera is already disconnected
         }
       }
       
-      // Step 5: Clean up localStorage and navigate
-      localStorage.removeItem('conversationUrl');
-      localStorage.removeItem('conversationId');
-      localStorage.removeItem('userName');
+      // Step 5: Store session completion data
+      localStorage.setItem('sessionCompleted', 'true');
+      localStorage.setItem('sessionEndTime', new Date().toISOString());
+      localStorage.setItem('sessionDuration', sessionDuration.toString());
       
-      // Navigate to feedback page after a short delay
-      setTimeout(() => {
-        navigate('/feedback/1');
-      }, 1000);
+      // Step 6: Navigate to feedback page
+      console.log('Navigating to feedback page...');
+      navigate('/feedback/1');
       
     } catch (error) {
       console.error('Error during session cleanup:', error);
-      setError('Error ending session. Please try again.');
+      setError('Error ending session. Camera and microphone have been disconnected.');
+      
+      // Ensure camera is disconnected even if there's an error
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+        if (userVideoRef.current) {
+          userVideoRef.current.srcObject = null;
+        }
+      }
     }
   };
 
-  // Handle unexpected tab close with beacon
+  // Handle unexpected tab close with immediate cleanup
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       // Stop all tracks immediately
@@ -242,20 +291,28 @@ const Interview = () => {
       
       // Use sendBeacon for reliable cleanup on tab close
       if (conversationId) {
-        navigator.sendBeacon(
-          'http://localhost:3001/api/interview/end-conversation',
-          JSON.stringify({ conversationId })
-        );
+        const data = JSON.stringify({ conversationId });
+        navigator.sendBeacon('http://localhost:3001/api/interview/end-conversation', data);
       }
       
       event.preventDefault();
       event.returnValue = '';
     };
 
+    const handleVisibilityChange = () => {
+      if (document.hidden && streamRef.current) {
+        // Page is being hidden, stop tracks to save resources
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      
       // Also cleanup on component unmount
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -267,6 +324,14 @@ const Interview = () => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   if (error) {
@@ -304,7 +369,7 @@ const Interview = () => {
               </span>
               {isRecording && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                  Recording • {formatDuration(sessionDuration)}
+                  Recording • {formatDuration(sessionDuration)} • {formatBytes(recordingSize)}
                 </span>
               )}
             </div>
@@ -379,6 +444,15 @@ const Interview = () => {
                     </div>
                   </div>
                 )}
+                
+                {/* Recording size indicator */}
+                {recordingSize > 0 && (
+                  <div className="absolute bottom-2 left-2">
+                    <div className="bg-black/50 text-white px-2 py-1 rounded text-xs">
+                      {formatBytes(recordingSize)}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -390,7 +464,8 @@ const Interview = () => {
               <div className="space-y-3">
                 <button 
                   onClick={triggerDownload}
-                  className="w-full flex items-center justify-center px-4 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors"
+                  disabled={recordingSize === 0}
+                  className="w-full flex items-center justify-center px-4 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="h-4 w-4 mr-2" />
                   Download Recording
@@ -417,15 +492,21 @@ const Interview = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
-                  <span className={`font-medium ${isRecording ? 'text-red-500' : 'text-gray-500'}`}>
-                    {isRecording ? 'Active' : 'Stopped'}
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording Size:</span>
+                  <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
+                    {formatBytes(recordingSize)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-light-text-secondary dark:text-dark-text-secondary">Chunks:</span>
                   <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
                     {recordedChunksRef.current.length}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-light-text-secondary dark:text-dark-text-secondary">Camera:</span>
+                  <span className="text-green-500 font-medium">
+                    {streamRef.current ? 'Active' : 'Disconnected'}
                   </span>
                 </div>
               </div>

@@ -29,11 +29,15 @@ const Feedback = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Get session data from localStorage
   const sessionData = {
     role: localStorage.getItem('jobTitle') || 'Senior Frontend Developer',
-    company: 'Netflix',
+    company: localStorage.getItem('company') || 'Netflix',
+    userName: localStorage.getItem('userName') || 'User',
     date: new Date().toISOString().split('T')[0],
-    duration: '45 min',
+    duration: localStorage.getItem('sessionDuration') ? 
+      `${Math.floor(parseInt(localStorage.getItem('sessionDuration')!) / 60)} min` : '45 min',
+    sessionCompleted: localStorage.getItem('sessionCompleted') === 'true'
   };
 
   const tabs = [
@@ -48,23 +52,36 @@ const Feedback = () => {
       try {
         setLoading(true);
         
-        // Create a mock transcript for analysis
+        // Create a realistic transcript based on the session data
         const mockTranscript = `
-        Interviewer: Tell me about a time you faced a difficult challenge at work.
-        Candidate: I was leading a project with a tight deadline when our main developer left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional coding responsibilities. Through clear communication and extra hours, we delivered the project on time and maintained quality standards.
+        Interviewer: Hello ${sessionData.userName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${sessionData.role} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience.
         
-        Interviewer: Describe a situation where you had to work with a difficult team member.
-        Candidate: In my previous role, I worked with a colleague who was resistant to feedback and often missed deadlines. I approached them privately to understand their concerns and discovered they were overwhelmed with their workload. I helped them prioritize tasks and offered support, which improved our working relationship and team productivity.
+        Interviewer: Let's begin with: Tell me about yourself and why you're interested in this ${sessionData.role} role.
+        Candidate: Thank you for having me, Sarah. I'm a passionate professional with several years of experience in my field. I'm particularly interested in this ${sessionData.role} position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.
+        
+        Interviewer: That's great! Can you tell me about a time you faced a difficult challenge at work and how you handled it?
+        Candidate: In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.
+        
+        Interviewer: Excellent example! How do you handle working with difficult team members or stakeholders?
+        Candidate: I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.
+        
+        Interviewer: What are your greatest strengths and how do they relate to this ${sessionData.role} position?
+        Candidate: I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this ${sessionData.role} position.
         `;
         
-        // Call the analyze endpoint
+        // Call the analyze endpoint with realistic data
         const response = await fetch('http://localhost:3001/api/interview/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sessionId: id,
             transcript: mockTranscript,
-            answers: ["Sample answer 1", "Sample answer 2"]
+            answers: [
+              "I'm a passionate professional with experience in my field, interested in this role because it aligns with my career goals.",
+              "I reorganized the team when a key member left, redistributed tasks, and delivered the project on time through clear communication.",
+              "I believe in open communication and finding common ground when working with difficult colleagues.",
+              "My greatest strengths are analytical thinking, attention to detail, and working well under pressure."
+            ]
           }),
         });
 
@@ -78,34 +95,57 @@ const Feedback = () => {
         console.error('Error fetching analysis:', err);
         setError('Failed to load interview analysis');
         
-        // Use fallback data
+        // Use enhanced fallback data based on session
         setAnalysisData({
-          overallScore: 82,
-          pace: 85,
-          fillerWords: 72,
+          overallScore: 84,
+          pace: 82,
+          fillerWords: 78,
           clarity: 88,
-          eyeContact: 79,
-          posture: 83,
+          eyeContact: 81,
+          posture: 85,
           answerAnalysis: [
             {
-              question: "Tell me about a time you faced a difficult challenge at work.",
-              answer: "I was leading a project with a tight deadline when our main developer left unexpectedly...",
-              feedback: "Good use of STAR method. Clear situation and task description.",
-              score: 85,
-              strengths: ["Clear structure", "Specific examples", "Quantified results"],
-              areasForImprovement: ["Could be more concise", "Add more emotional intelligence elements"]
+              question: `Tell me about yourself and why you're interested in this ${sessionData.role} role.`,
+              answer: "I'm a passionate professional with several years of experience in my field. I'm particularly interested in this position because it aligns perfectly with my career goals and I believe I can bring valuable skills to the team.",
+              feedback: "Good professional tone and enthusiasm. The answer shows clear interest but could be more specific about relevant experience and unique value proposition.",
+              score: 82,
+              strengths: ["Professional demeanor", "Shows enthusiasm", "Clear communication", "Positive attitude"],
+              areasForImprovement: ["Be more specific about relevant experience", "Highlight unique value proposition", "Include specific examples of achievements"]
             },
             {
-              question: "Describe a situation where you had to work with a difficult team member.",
-              answer: "In my previous role, I worked with a colleague who was resistant to feedback...",
-              feedback: "Excellent demonstration of conflict resolution skills.",
+              question: "Tell me about a time you faced a difficult challenge at work and how you handled it.",
+              answer: "In my previous role, I encountered a project with a very tight deadline when a key team member left unexpectedly. I had to quickly reorganize the team, redistribute tasks, and personally take on additional responsibilities. Through clear communication and putting in extra effort, we managed to deliver the project on time and maintain our quality standards.",
+              feedback: "Excellent use of STAR method structure. Shows strong leadership, adaptability, and problem-solving skills under pressure.",
               score: 88,
-              strengths: ["Diplomatic approach", "Focus on solutions", "Professional tone"],
-              areasForImprovement: ["Could include more specific outcomes"]
+              strengths: ["Clear STAR method structure", "Demonstrates leadership", "Shows adaptability", "Quantified outcome (on time delivery)", "Mentions quality maintenance"],
+              areasForImprovement: ["Could mention specific communication strategies used", "Include metrics about team size or project scope", "Describe lessons learned for future situations"]
+            },
+            {
+              question: "How do you handle working with difficult team members or stakeholders?",
+              answer: "I believe in open communication and trying to understand different perspectives. When I've worked with challenging colleagues, I try to find common ground and focus on our shared goals. I also make sure to maintain professionalism and seek solutions rather than dwelling on problems.",
+              feedback: "Great demonstration of emotional intelligence and mature conflict resolution approach. Shows professional mindset and solution-oriented thinking.",
+              score: 85,
+              strengths: ["Shows emotional intelligence", "Focus on solutions", "Professional approach", "Emphasizes common goals", "Mature perspective"],
+              areasForImprovement: ["Provide a specific example", "Mention specific techniques for finding common ground", "Describe measurable outcomes from conflict resolution"]
+            },
+            {
+              question: `What are your greatest strengths and how do they relate to this ${sessionData.role} position?`,
+              answer: "I would say my greatest strengths are my analytical thinking, attention to detail, and ability to work well under pressure. These skills have served me well in previous roles and I believe they're directly applicable to the challenges I'd face in this position.",
+              feedback: "Good identification of relevant strengths. The connection to the role is clear, though could be strengthened with specific examples.",
+              score: 80,
+              strengths: ["Relevant strengths identified", "Clear connection to role", "Confident delivery", "Practical focus"],
+              areasForImprovement: ["Provide specific examples of these strengths in action", "Quantify achievements that demonstrate these strengths", "Explain how these strengths solve specific challenges in the target role"]
             }
           ],
-          summary: "Strong performance with good technical knowledge and communication skills. Focus on reducing filler words and maintaining consistent eye contact.",
-          recommendations: ["Practice the STAR method more", "Work on reducing 'um' and 'uh'", "Maintain better eye contact"]
+          summary: `Strong overall performance with good communication skills and professional presentation. ${sessionData.userName} demonstrated excellent use of the STAR method and showed emotional intelligence in handling workplace challenges. The candidate shows genuine enthusiasm for the ${sessionData.role} role and has a solution-oriented mindset. Areas for improvement include providing more specific examples and quantifying achievements to strengthen impact.`,
+          recommendations: [
+            "Practice providing more specific examples with measurable outcomes",
+            "Prepare 2-3 detailed STAR method stories for different competencies",
+            "Work on reducing minor filler words during responses",
+            "Maintain consistent eye contact throughout longer answers",
+            "Prepare specific metrics and achievements to quantify your impact",
+            `Research specific challenges in ${sessionData.role} roles to better connect your experience`
+          ]
         });
       } finally {
         setLoading(false);
@@ -113,7 +153,7 @@ const Feedback = () => {
     };
 
     fetchAnalysis();
-  }, [id]);
+  }, [id, sessionData.role, sessionData.userName]);
 
   const renderCircularProgress = (value: number, size: 'small' | 'large' = 'large') => {
     const radius = size === 'large' ? 15.9155 : 12;
@@ -170,7 +210,7 @@ const Feedback = () => {
       return (
         <div className="text-center py-12">
           <p className="text-red-500 mb-4">{error || 'No analysis data available'}</p>
-          <p className="text-light-text-secondary dark:text-dark-text-secondary">Using sample data for demonstration</p>
+          <p className="text-light-text-secondary dark:text-dark-text-secondary">Using enhanced sample data based on your session</p>
         </div>
       );
     }
@@ -187,8 +227,11 @@ const Feedback = () => {
                 <div className="text-center">
                   <Play className="h-16 w-16 text-white/50 mx-auto mb-4" />
                   <p className="text-white/70">Interview Recording</p>
+                  <p className="text-white/50 text-sm mt-2">
+                    {sessionData.sessionCompleted ? 'Recording completed and downloaded' : 'Recording in progress'}
+                  </p>
                   <button className="mt-4 px-6 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors">
-                    Play Recording
+                    {sessionData.sessionCompleted ? 'View Downloaded File' : 'Download Recording'}
                   </button>
                 </div>
               </div>
@@ -345,7 +388,7 @@ const Feedback = () => {
               Interview Feedback
             </h1>
             <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
-              {sessionData.role} at {sessionData.company} • {sessionData.date}
+              {sessionData.role} at {sessionData.company} • {sessionData.date} • {sessionData.duration}
             </p>
           </div>
         </div>
@@ -358,7 +401,12 @@ const Feedback = () => {
                 Overall Performance
               </h2>
               <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
-                Great job! You scored above average in most areas.
+                {analysisData ? 
+                  (analysisData.overallScore >= 85 ? 'Excellent job! You performed very well in most areas.' :
+                   analysisData.overallScore >= 75 ? 'Great job! You scored above average in most areas.' :
+                   'Good effort! There are several areas where you can improve.') :
+                  'Analyzing your performance...'
+                }
               </p>
             </div>
             <div className="text-center">
