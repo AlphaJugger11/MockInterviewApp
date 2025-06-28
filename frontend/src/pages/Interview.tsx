@@ -17,6 +17,8 @@ const Interview = () => {
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [screenSharingRequested, setScreenSharingRequested] = useState(false);
+  const [recordingInitialized, setRecordingInitialized] = useState(false);
 
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
@@ -57,11 +59,17 @@ const Interview = () => {
     };
   }, [navigate, isEnding]);
 
-  // Browser-based recording as fallback (since no S3 bucket)
+  // Browser-based recording with proper state management
   useEffect(() => {
     const startBrowserRecording = async () => {
+      // Prevent multiple screen sharing requests
+      if (screenSharingRequested || recordingInitialized || !conversationId) {
+        return;
+      }
+
       try {
-        console.log('🎬 Starting browser-based screen recording...');
+        console.log('🎬 Requesting screen sharing permission...');
+        setScreenSharingRequested(true);
         
         // Request screen capture with audio
         const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -76,6 +84,9 @@ const Interview = () => {
             sampleRate: 44100
           }
         });
+        
+        console.log('✅ Screen sharing permission granted');
+        setRecordingInitialized(true);
         
         // Create MediaRecorder with WebM format
         const recorder = new MediaRecorder(stream, {
@@ -116,6 +127,8 @@ const Interview = () => {
         
         recorder.onerror = (event) => {
           console.error('❌ Recording error:', event);
+          setScreenSharingRequested(false);
+          setRecordingInitialized(false);
         };
         
         // Start recording with data collection every second
@@ -130,18 +143,47 @@ const Interview = () => {
           if (recorder.state === 'recording') {
             recorder.stop();
           }
+          // Reset states when user stops sharing
+          setScreenSharingRequested(false);
+          setRecordingInitialized(false);
+        });
+        
+        // Handle track changes
+        stream.addEventListener('removetrack', () => {
+          console.log('📺 Track removed from stream');
+          if (recorder.state === 'recording') {
+            recorder.stop();
+          }
+          setScreenSharingRequested(false);
+          setRecordingInitialized(false);
         });
         
       } catch (error) {
-        console.warn('⚠️ Browser recording not available:', error);
+        console.warn('⚠️ Screen sharing denied or not available:', error);
+        setScreenSharingRequested(false);
+        setRecordingInitialized(false);
+        
+        // Don't show error for user cancellation
+        if (error instanceof Error && error.name === 'NotAllowedError') {
+          console.log('📺 User denied screen sharing permission');
+        } else if (error instanceof Error && error.name === 'AbortError') {
+          console.log('📺 User cancelled screen sharing dialog');
+        }
+        
         // Continue without browser recording - Tavus will handle recording
       }
     };
     
-    if (conversationId && !mediaRecorder && isRecording) {
-      startBrowserRecording();
+    // Only start recording once when conversation is ready
+    if (conversationId && isRecording && !screenSharingRequested && !recordingInitialized) {
+      // Add a small delay to ensure the page is fully loaded
+      const timeout = setTimeout(() => {
+        startBrowserRecording();
+      }, 2000);
+      
+      return () => clearTimeout(timeout);
     }
-  }, [conversationId, isRecording, sessionDuration]);
+  }, [conversationId, isRecording, screenSharingRequested, recordingInitialized, sessionDuration]);
 
   // CRITICAL: Enhanced session cleanup with REAL transcript and recording capture
   const handleEndSession = async () => {
@@ -418,11 +460,12 @@ TRANSCRIPT:
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session - Tavus + Browser Recording
+                Live Interview Session - Tavus Recording
               </span>
               {isRecording && !isEnding && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                  Recording • {formatDuration(sessionDuration)} • Dual Recording Active
+                  Recording • {formatDuration(sessionDuration)} • 
+                  {recordingInitialized ? ' Screen + Cloud Recording' : ' Cloud Recording Only'}
                 </span>
               )}
             </div>
@@ -465,10 +508,16 @@ TRANSCRIPT:
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                     <span>Tavus Cloud Recording</span>
                   </div>
-                  {mediaRecorder && mediaRecorder.state === 'recording' && (
+                  {recordingInitialized && mediaRecorder && mediaRecorder.state === 'recording' && (
                     <div className="inline-flex items-center space-x-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full text-sm">
                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                      <span>Browser Backup Recording</span>
+                      <span>Screen Recording Active</span>
+                    </div>
+                  )}
+                  {screenSharingRequested && !recordingInitialized && (
+                    <div className="inline-flex items-center space-x-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 px-3 py-1 rounded-full text-sm">
+                      <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+                      <span>Screen Sharing Requested</span>
                     </div>
                   )}
                 </div>
@@ -505,7 +554,7 @@ TRANSCRIPT:
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
               <span className="text-green-500 font-medium">
-                Tavus + Browser
+                {recordingInitialized ? 'Tavus + Screen' : 'Tavus Cloud'}
               </span>
             </div>
             <div className="flex justify-between">
@@ -534,14 +583,16 @@ TRANSCRIPT:
                 </span>
               </div>
             )}
-            {mediaRecorder && (
-              <div className="flex justify-between">
-                <span className="text-light-text-secondary dark:text-dark-text-secondary">Browser Rec:</span>
-                <span className={`font-medium text-xs ${mediaRecorder.state === 'recording' ? 'text-green-500' : 'text-gray-500'}`}>
-                  {mediaRecorder.state}
-                </span>
-              </div>
-            )}
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Screen Share:</span>
+              <span className={`font-medium text-xs ${
+                recordingInitialized ? 'text-green-500' : 
+                screenSharingRequested ? 'text-yellow-500' : 'text-gray-500'
+              }`}>
+                {recordingInitialized ? 'Active' : 
+                 screenSharingRequested ? 'Requested' : 'Not Started'}
+              </span>
+            </div>
           </div>
           
           {/* Additional Info */}
@@ -551,10 +602,13 @@ TRANSCRIPT:
             </h4>
             <ul className="text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
               <li>• Primary recording handled by Tavus cloud infrastructure</li>
-              <li>• Browser screen recording as backup (WebM format)</li>
+              <li>• Optional screen recording for backup (requires permission)</li>
               <li>• Real-time transcript captured during conversation</li>
               <li>• Both recording and transcript available for download when session ends</li>
               <li>• Analysis based on actual conversation content</li>
+              {!recordingInitialized && !screenSharingRequested && (
+                <li className="text-yellow-600 dark:text-yellow-400">• Screen recording will be requested after page loads</li>
+              )}
             </ul>
           </div>
         </div>
