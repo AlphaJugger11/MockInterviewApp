@@ -13,18 +13,19 @@ const Interview = () => {
   const [userName, setUserName] = useState<string>('');
   const [isEnding, setIsEnding] = useState(false);
 
-  // Browser recording states
+  // Enhanced recording states for local capture
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
-  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
-  const [screenSharingRequested, setScreenSharingRequested] = useState(false);
-  const [recordingInitialized, setRecordingInitialized] = useState(false);
+  const [localRecordingUrl, setLocalRecordingUrl] = useState<string | null>(null);
+  const [capturedTranscript, setCapturedTranscript] = useState<any[]>([]);
+  const [recordingActive, setRecordingActive] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
 
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const endingInProgressRef = useRef<boolean>(false);
+  const transcriptIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Get the conversation data from localStorage
@@ -58,27 +59,29 @@ const Interview = () => {
     // Cleanup function
     return () => {
       clearInterval(timer);
+      if (transcriptIntervalRef.current) {
+        clearInterval(transcriptIntervalRef.current);
+      }
     };
   }, [navigate, isEnding, sessionEnded]);
 
-  // Browser-based recording with proper state management
+  // Enhanced local recording with automatic start
   useEffect(() => {
-    const startBrowserRecording = async () => {
-      // Prevent multiple screen sharing requests and don't start if session is ending
-      if (screenSharingRequested || recordingInitialized || !conversationId || isEnding || sessionEnded) {
+    const startLocalRecording = async () => {
+      if (!conversationId || recordingActive || isEnding || sessionEnded) {
         return;
       }
 
       try {
-        console.log('🎬 Requesting screen sharing permission...');
-        setScreenSharingRequested(true);
+        console.log('🎬 Starting local screen recording...');
         
         // Request screen capture with audio
         const stream = await navigator.mediaDevices.getDisplayMedia({
           video: { 
             mediaSource: 'screen',
             width: { ideal: 1920 },
-            height: { ideal: 1080 }
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 }
           },
           audio: {
             echoCancellation: true,
@@ -87,12 +90,13 @@ const Interview = () => {
           }
         });
         
-        console.log('✅ Screen sharing permission granted');
-        setRecordingInitialized(true);
+        console.log('✅ Screen capture permission granted');
         
-        // Create MediaRecorder with WebM format
+        // Create MediaRecorder with high quality WebM
         const recorder = new MediaRecorder(stream, {
-          mimeType: 'video/webm;codecs=vp9,opus'
+          mimeType: 'video/webm;codecs=vp9,opus',
+          videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+          audioBitsPerSecond: 128000   // 128 kbps for audio
         });
         
         const chunks: Blob[] = [];
@@ -105,210 +109,203 @@ const Interview = () => {
         };
         
         recorder.onstop = () => {
-          console.log('🛑 Browser recording stopped, processing...');
+          console.log('🛑 Local recording stopped, creating download file...');
           const blob = new Blob(chunks, { type: 'video/webm' });
           const url = URL.createObjectURL(blob);
           
-          console.log('✅ Recording blob created:', blob.size, 'bytes');
+          console.log('✅ Local recording blob created:', blob.size, 'bytes');
           
-          // Store recording
-          localStorage.setItem(`recording_${conversationId}`, url);
-          localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
+          // Store for immediate download
+          setLocalRecordingUrl(url);
+          setRecordedChunks(chunks);
+          
+          // Store in localStorage for later access
+          localStorage.setItem(`local_recording_${conversationId}`, url);
+          localStorage.setItem(`local_recording_${conversationId}_metadata`, JSON.stringify({
             format: 'webm',
-            source: 'browser_screen_capture',
+            source: 'local_screen_capture',
             url: url,
             timestamp: new Date().toISOString(),
             size: blob.size,
-            duration: sessionDuration
+            duration: sessionDuration,
+            quality: 'high'
           }));
           
-          setRecordingUrl(url);
-          setRecordedChunks(chunks);
-          console.log('💾 Browser recording saved to localStorage');
+          console.log('💾 Local recording saved and ready for download');
         };
         
         recorder.onerror = (event) => {
           console.error('❌ Recording error:', event);
-          setScreenSharingRequested(false);
-          setRecordingInitialized(false);
+          setRecordingActive(false);
         };
         
-        // Start recording with data collection every second
-        recorder.start(1000);
+        // Start recording
+        recorder.start(1000); // Collect data every second
         setMediaRecorder(recorder);
+        setRecordingActive(true);
         
-        console.log('✅ Browser recording started successfully');
+        console.log('✅ Local screen recording started successfully');
         
-        // Handle stream end (user stops sharing)
+        // Handle stream end
         stream.getVideoTracks()[0].addEventListener('ended', () => {
           console.log('📺 Screen sharing ended by user');
           if (recorder.state === 'recording') {
             recorder.stop();
           }
-          // Reset states when user stops sharing
-          setScreenSharingRequested(false);
-          setRecordingInitialized(false);
-        });
-        
-        // Handle track changes
-        stream.addEventListener('removetrack', () => {
-          console.log('📺 Track removed from stream');
-          if (recorder.state === 'recording') {
-            recorder.stop();
-          }
-          setScreenSharingRequested(false);
-          setRecordingInitialized(false);
+          setRecordingActive(false);
         });
         
       } catch (error) {
-        console.warn('⚠️ Screen sharing denied or not available:', error);
-        setScreenSharingRequested(false);
-        setRecordingInitialized(false);
+        console.warn('⚠️ Screen recording not available:', error);
+        setRecordingActive(false);
         
-        // Don't show error for user cancellation
         if (error instanceof Error && error.name === 'NotAllowedError') {
-          console.log('📺 User denied screen sharing permission');
-        } else if (error instanceof Error && error.name === 'AbortError') {
-          console.log('📺 User cancelled screen sharing dialog');
+          console.log('📺 User denied screen sharing permission - continuing with Tavus recording only');
         }
-        
-        // Continue without browser recording - Tavus will handle recording
       }
     };
     
-    // Only start recording once when conversation is ready and not ending
-    if (conversationId && isRecording && !screenSharingRequested && !recordingInitialized && !isEnding && !sessionEnded) {
-      // Add a small delay to ensure the page is fully loaded
+    // Start local recording after a short delay
+    if (conversationId && isRecording && !recordingActive && !isEnding && !sessionEnded) {
       const timeout = setTimeout(() => {
-        startBrowserRecording();
-      }, 2000);
+        startLocalRecording();
+      }, 3000); // 3 second delay to ensure page is loaded
       
       return () => clearTimeout(timeout);
     }
-  }, [conversationId, isRecording, screenSharingRequested, recordingInitialized, sessionDuration, isEnding, sessionEnded]);
+  }, [conversationId, isRecording, recordingActive, sessionDuration, isEnding, sessionEnded]);
 
-  // CRITICAL: Enhanced session cleanup with REAL transcript and recording capture
+  // Enhanced transcript capture
+  useEffect(() => {
+    const captureTranscript = async () => {
+      if (!conversationId || isEnding || sessionEnded) return;
+
+      try {
+        const response = await fetch(`http://localhost:3001/api/interview/get-conversation/${conversationId}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.transcriptEvents && data.transcriptEvents.length > 0) {
+            setCapturedTranscript(data.transcriptEvents);
+            
+            // Store transcript in localStorage
+            localStorage.setItem(`live_transcript_${conversationId}`, JSON.stringify(data.transcriptEvents));
+            console.log('📝 Live transcript updated:', data.transcriptEvents.length, 'events');
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Error capturing live transcript:', error);
+      }
+    };
+
+    // Start transcript capture interval
+    if (conversationId && !transcriptIntervalRef.current && !isEnding && !sessionEnded) {
+      transcriptIntervalRef.current = setInterval(captureTranscript, 5000); // Every 5 seconds
+      console.log('📝 Started live transcript capture');
+    }
+
+    return () => {
+      if (transcriptIntervalRef.current) {
+        clearInterval(transcriptIntervalRef.current);
+        transcriptIntervalRef.current = null;
+      }
+    };
+  }, [conversationId, isEnding, sessionEnded]);
+
+  // Enhanced session cleanup with guaranteed downloads
   const handleEndSession = async () => {
-    if (isEnding || endingInProgressRef.current || sessionEnded) return; // Prevent multiple calls
+    if (isEnding || endingInProgressRef.current || sessionEnded) return;
     
-    console.log('🛑 CRITICAL: Ending interview session...');
+    console.log('🛑 CRITICAL: Ending interview session and preparing downloads...');
     setIsEnding(true);
     setSessionEnded(true);
     endingInProgressRef.current = true;
     
     try {
-      // Step 1: Stop browser recording first (NO NEW SCREEN SHARING REQUESTS)
+      // Step 1: Stop local recording and prepare for download
       if (mediaRecorder && mediaRecorder.state === 'recording') {
-        console.log('🛑 Stopping browser recording...');
+        console.log('🛑 Stopping local recording...');
         mediaRecorder.stop();
         
-        // Wait a moment for the recording to process
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Wait for recording to process
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
-      
-      // Step 2: Capture REAL conversation data from Tavus API
-      console.log('📊 Capturing REAL conversation data from Tavus...');
-      let realTranscript: any[] = [];
-      let conversationData: any = {};
-      let tavusRecordingUrl: string | null = null;
+
+      // Step 2: Capture final transcript
+      console.log('📝 Capturing final transcript...');
+      let finalTranscript: any[] = [];
       
       if (conversationId) {
         try {
-          console.log('🔍 Fetching REAL conversation data from Tavus API...');
           const response = await fetch(`http://localhost:3001/api/interview/get-conversation/${conversationId}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
           });
           
           if (response.ok) {
-            conversationData = await response.json();
-            console.log('✅ Retrieved REAL conversation data:', conversationData);
-            
-            // Extract REAL transcript from conversation data
+            const conversationData = await response.json();
             if (conversationData.transcriptEvents && conversationData.transcriptEvents.length > 0) {
-              realTranscript = conversationData.transcriptEvents;
-              console.log('📝 Extracted REAL transcript events:', realTranscript.length);
-            } else if (conversationData.transcript) {
-              // Convert string transcript to events
-              const transcriptText = conversationData.transcript;
-              realTranscript = transcriptText.split('\n').map((line: string, index: number) => {
-                const trimmedLine = line.trim();
-                if (trimmedLine.length === 0) return null;
-                
-                return {
-                  timestamp: new Date().toISOString(),
-                  type: 'conversation',
-                  content: trimmedLine,
-                  participant: trimmedLine.toLowerCase().includes('sarah') || 
-                              trimmedLine.toLowerCase().includes('interviewer') ? 'ai' : 'user',
-                  sessionId: conversationId,
-                  index
-                };
-              }).filter(item => item !== null);
-              
-              console.log('📝 Converted transcript to events:', realTranscript.length);
-            }
-            
-            // Get Tavus recording URL if available
-            if (conversationData.recording_url) {
-              tavusRecordingUrl = conversationData.recording_url;
-              console.log('🎬 Tavus recording URL available:', tavusRecordingUrl);
+              finalTranscript = conversationData.transcriptEvents;
+              console.log('✅ Retrieved final transcript:', finalTranscript.length, 'events');
             }
           }
         } catch (apiError) {
-          console.warn('⚠️ Could not retrieve conversation data from API:', apiError);
+          console.warn('⚠️ Could not retrieve final transcript from API:', apiError);
         }
       }
-      
-      // Step 3: Store final session data with REAL transcript and recording
+
+      // Use captured transcript as fallback
+      if (finalTranscript.length === 0 && capturedTranscript.length > 0) {
+        finalTranscript = capturedTranscript;
+        console.log('📝 Using captured transcript as fallback:', finalTranscript.length, 'events');
+      }
+
+      // Step 3: Store final session data
       const finalSessionData = {
         conversationId,
-        transcript: realTranscript,
+        transcript: finalTranscript,
         duration: sessionDuration,
         endTime: new Date().toISOString(),
         userName,
         jobTitle: localStorage.getItem('jobTitle'),
         company: localStorage.getItem('company'),
-        conversationData: conversationData,
-        recordingUrl: tavusRecordingUrl || recordingUrl, // Prefer Tavus, fallback to browser
-        browserRecordingUrl: recordingUrl,
-        tavusRecordingUrl: tavusRecordingUrl
+        localRecordingUrl: localRecordingUrl,
+        hasLocalRecording: !!localRecordingUrl,
+        transcriptLength: finalTranscript.length
       };
       
       localStorage.setItem(`session_${conversationId}`, JSON.stringify(finalSessionData));
-      localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(realTranscript));
+      localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(finalTranscript));
       
-      // Store recording URLs if available
-      if (tavusRecordingUrl) {
-        localStorage.setItem(`recording_${conversationId}`, tavusRecordingUrl);
-        localStorage.setItem(`recording_${conversationId}_metadata`, JSON.stringify({
-          format: 'mp4',
-          source: 'tavus_cloud',
-          url: tavusRecordingUrl,
-          timestamp: new Date().toISOString()
-        }));
-      } else if (recordingUrl) {
-        // Keep browser recording as fallback
-        console.log('📹 Using browser recording as fallback');
-      }
-      
-      console.log('💾 Final session data stored with REAL transcript and recording');
-      
-      // Step 4: Download REAL transcript immediately
-      if (realTranscript.length > 0) {
-        downloadRealTranscript(realTranscript);
+      console.log('💾 Final session data stored');
+
+      // Step 4: Force download transcript immediately
+      if (finalTranscript.length > 0) {
+        downloadTranscriptFile(finalTranscript);
       } else {
-        console.warn('⚠️ No real transcript available for download');
+        console.warn('⚠️ No transcript available for download');
+        alert('No transcript was captured during the session.');
       }
-      
-      // Step 5: End conversation on backend with better error handling
+
+      // Step 5: Force download recording if available
+      if (localRecordingUrl) {
+        downloadRecordingFile();
+      } else {
+        console.warn('⚠️ No local recording available for download');
+        alert('No local recording was captured. Only Tavus cloud recording is available.');
+      }
+
+      // Step 6: End conversation on backend (non-blocking)
       if (conversationId) {
         try {
           console.log('🛑 Ending conversation on backend...');
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
           
-          const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
+          fetch('http://localhost:3001/api/interview/end-conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -316,35 +313,29 @@ const Interview = () => {
               dynamicPersonaId
             }),
             signal: controller.signal
-          });
-          
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            const endData = await response.json();
-            console.log('✅ Conversation ended successfully on backend');
-            
-            // If backend returned additional conversation data, use it
-            if (endData.conversationData && endData.conversationData.transcript) {
-              console.log('📝 Backend returned additional transcript data');
+          }).then(response => {
+            clearTimeout(timeoutId);
+            if (response.ok) {
+              console.log('✅ Conversation ended successfully on backend');
             }
-          } else {
-            console.warn('⚠️ Failed to end conversation on backend, but continuing...');
-          }
+          }).catch(error => {
+            console.warn('⚠️ Error ending conversation on backend (non-blocking):', error);
+          });
         } catch (endError) {
-          console.warn('⚠️ Error ending conversation on backend (continuing anyway):', endError);
-          // Don't block navigation if backend cleanup fails
+          console.warn('⚠️ Error ending conversation on backend (non-blocking):', endError);
         }
       }
       
-      // Step 6: Store session completion data
+      // Step 7: Store completion data and navigate
       localStorage.setItem('sessionCompleted', 'true');
       localStorage.setItem('sessionEndTime', new Date().toISOString());
       localStorage.setItem('sessionDuration', sessionDuration.toString());
       
-      // Step 7: Navigate to feedback page
-      console.log('✅ Navigating to feedback page...');
-      navigate('/feedback/1');
+      // Navigate after a short delay to ensure downloads start
+      setTimeout(() => {
+        console.log('✅ Navigating to feedback page...');
+        navigate('/feedback/1');
+      }, 2000);
       
     } catch (error) {
       console.error('❌ Error during session cleanup:', error);
@@ -355,22 +346,22 @@ const Interview = () => {
     }
   };
 
-  // Download REAL conversation transcript with proper formatting
-  const downloadRealTranscript = (transcript: any[]) => {
+  // Force download transcript file
+  const downloadTranscriptFile = (transcript: any[]) => {
     try {
       if (transcript.length === 0) {
-        console.warn('⚠️ No real transcript data to download');
+        console.warn('⚠️ No transcript data to download');
         return;
       }
       
-      // Format transcript for download with proper speaker identification
+      // Format transcript for download
       const formattedTranscript = transcript.map(event => {
         const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
         const timestamp = new Date(event.timestamp).toLocaleTimeString();
         return `[${timestamp}] ${speaker}: ${event.content}`;
       }).join('\n\n');
       
-      // Add header information
+      // Add header
       const header = `INTERVIEW TRANSCRIPT
 ===================
 Candidate: ${userName}
@@ -379,6 +370,7 @@ Company: ${localStorage.getItem('company') || 'Not specified'}
 Date: ${new Date().toLocaleDateString()}
 Duration: ${Math.floor(sessionDuration / 60)}:${(sessionDuration % 60).toString().padStart(2, '0')}
 Conversation ID: ${conversationId}
+Events Count: ${transcript.length}
 
 TRANSCRIPT:
 ===========
@@ -387,24 +379,48 @@ TRANSCRIPT:
       
       const fullTranscript = header + formattedTranscript;
       
-      const transcriptBlob = new Blob([fullTranscript], { type: 'text/plain' });
-      const url = URL.createObjectURL(transcriptBlob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `interview-transcript-${userName}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+      // Create and trigger download
+      const blob = new Blob([fullTranscript], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `interview-transcript-${userName}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+      link.style.display = 'none';
       
-      document.body.appendChild(a);
-      a.click();
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
+      // Cleanup
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       
-      console.log('📄 REAL transcript downloaded successfully');
+      console.log('📄 Transcript download triggered successfully');
     } catch (error) {
-      console.error('❌ Error downloading real transcript:', error);
+      console.error('❌ Error downloading transcript:', error);
+    }
+  };
+
+  // Force download recording file
+  const downloadRecordingFile = () => {
+    try {
+      if (!localRecordingUrl) {
+        console.warn('⚠️ No local recording URL available');
+        return;
+      }
+      
+      // Create and trigger download
+      const link = document.createElement('a');
+      link.href = localRecordingUrl;
+      link.download = `interview-recording-${userName}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+      link.style.display = 'none';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log('🎬 Recording download triggered successfully');
+    } catch (error) {
+      console.error('❌ Error downloading recording:', error);
     }
   };
 
@@ -416,7 +432,12 @@ TRANSCRIPT:
         mediaRecorder.stop();
       }
       
-      // Use sendBeacon for reliable cleanup on tab close
+      // Cleanup intervals
+      if (transcriptIntervalRef.current) {
+        clearInterval(transcriptIntervalRef.current);
+      }
+      
+      // Use sendBeacon for reliable cleanup
       if (conversationId && !isEnding && !sessionEnded) {
         const data = JSON.stringify({ 
           conversationId,
@@ -473,12 +494,12 @@ TRANSCRIPT:
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session - Tavus Recording
+                Live Interview Session - Recording Active
               </span>
               {isRecording && !isEnding && !sessionEnded && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
                   Recording • {formatDuration(sessionDuration)} • 
-                  {recordingInitialized ? ' Screen + Cloud Recording' : ' Cloud Recording Only'}
+                  {recordingActive ? ' Local + Cloud Recording' : ' Cloud Recording Only'}
                 </span>
               )}
             </div>
@@ -488,14 +509,14 @@ TRANSCRIPT:
               className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Square className="h-4 w-4 mr-2" />
-              {isEnding ? 'Ending Session...' : 'End Session & Download'}
+              {isEnding ? 'Ending & Downloading...' : 'End Session & Download'}
             </button>
           </div>
         </div>
       </div>
       
       <div className="max-w-6xl mx-auto p-8">
-        {/* Single Interview Area - ONLY Tavus iframe */}
+        {/* Interview Area */}
         <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
           <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
             AI Interview with Sarah - {userName}
@@ -521,16 +542,16 @@ TRANSCRIPT:
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                     <span>Tavus Cloud Recording</span>
                   </div>
-                  {recordingInitialized && mediaRecorder && mediaRecorder.state === 'recording' && (
+                  {recordingActive && (
                     <div className="inline-flex items-center space-x-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full text-sm">
                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                      <span>Screen Recording Active</span>
+                      <span>Local Recording Active</span>
                     </div>
                   )}
-                  {screenSharingRequested && !recordingInitialized && !isEnding && !sessionEnded && (
-                    <div className="inline-flex items-center space-x-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 px-3 py-1 rounded-full text-sm">
-                      <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
-                      <span>Screen Sharing Requested</span>
+                  {capturedTranscript.length > 0 && (
+                    <div className="inline-flex items-center space-x-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 px-3 py-1 rounded-full text-sm">
+                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
+                      <span>Transcript: {capturedTranscript.length} events</span>
                     </div>
                   )}
                 </div>
@@ -567,7 +588,7 @@ TRANSCRIPT:
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
               <span className="text-green-500 font-medium">
-                {recordingInitialized ? 'Tavus + Screen' : 'Tavus Cloud'}
+                {recordingActive ? 'Local + Cloud' : 'Cloud Only'}
               </span>
             </div>
             <div className="flex justify-between">
@@ -585,42 +606,40 @@ TRANSCRIPT:
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Transcript:</span>
               <span className="text-purple-500 font-medium">
-                Real-time Capture
+                {capturedTranscript.length} events
               </span>
             </div>
-            {dynamicPersonaId && (
-              <div className="flex justify-between">
-                <span className="text-light-text-secondary dark:text-dark-text-secondary">AI Persona:</span>
-                <span className="text-purple-500 font-medium text-xs">
-                  Dynamic
-                </span>
-              </div>
-            )}
             <div className="flex justify-between">
-              <span className="text-light-text-secondary dark:text-dark-text-secondary">Screen Share:</span>
-              <span className={`font-medium text-xs ${
-                recordingInitialized ? 'text-green-500' : 
-                screenSharingRequested && !isEnding && !sessionEnded ? 'text-yellow-500' : 'text-gray-500'
-              }`}>
-                {recordingInitialized ? 'Active' : 
-                 screenSharingRequested && !isEnding && !sessionEnded ? 'Requested' : 'Not Started'}
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Local Recording:</span>
+              <span className={`font-medium text-xs ${recordingActive ? 'text-green-500' : 'text-gray-500'}`}>
+                {recordingActive ? 'Active' : 'Not Started'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Download Ready:</span>
+              <span className={`font-medium text-xs ${localRecordingUrl ? 'text-green-500' : 'text-yellow-500'}`}>
+                {localRecordingUrl ? 'Yes' : 'Processing...'}
               </span>
             </div>
           </div>
           
-          {/* Additional Info */}
+          {/* Download Info */}
           <div className="mt-4 p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
             <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
-              Recording & Transcript Information
+              Download Information
             </h4>
             <ul className="text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
-              <li>• Primary recording handled by Tavus cloud infrastructure</li>
-              <li>• Optional screen recording for backup (requires permission)</li>
-              <li>• Real-time transcript captured during conversation</li>
-              <li>• Both recording and transcript available for download when session ends</li>
-              <li>• Analysis based on actual conversation content</li>
-              {!recordingInitialized && !screenSharingRequested && !isEnding && !sessionEnded && (
-                <li className="text-yellow-600 dark:text-yellow-400">• Screen recording will be requested after page loads</li>
+              <li>• Local screen recording captures your full interview session</li>
+              <li>• Real-time transcript is captured every 5 seconds</li>
+              <li>• Both files will automatically download when you end the session</li>
+              <li>• Files are saved locally on your machine for privacy</li>
+              <li>• Transcript format: .txt file with timestamps</li>
+              <li>• Recording format: .webm file (high quality)</li>
+              {!recordingActive && !isEnding && !sessionEnded && (
+                <li className="text-yellow-600 dark:text-yellow-400">• Local recording will start automatically</li>
+              )}
+              {recordingActive && (
+                <li className="text-green-600 dark:text-green-400">• ✅ Local recording is active and capturing</li>
               )}
             </ul>
           </div>

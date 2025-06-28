@@ -30,7 +30,7 @@ const Feedback = () => {
   const [analysisData, setAnalysisData] = useState<AnalysisData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [localRecordingUrl, setLocalRecordingUrl] = useState<string | null>(null);
   const [recordingMetadata, setRecordingMetadata] = useState<any>(null);
 
   // Get session data from localStorage
@@ -59,6 +59,7 @@ const Feedback = () => {
         
         // Get stored conversation transcript and session data
         const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
+        const liveTranscript = localStorage.getItem(`live_transcript_${sessionData.conversationId}`);
         const storedSession = localStorage.getItem(`session_${sessionData.conversationId}`);
         
         let realTranscript = null;
@@ -70,12 +71,15 @@ const Feedback = () => {
           console.log('📊 Retrieved session data from storage:', sessionDataFromStorage);
         }
         
-        if (storedTranscript) {
-          const transcriptData = JSON.parse(storedTranscript);
+        // Use live transcript if available, otherwise use stored transcript
+        const transcriptToUse = liveTranscript || storedTranscript;
+        
+        if (transcriptToUse) {
+          const transcriptData = JSON.parse(transcriptToUse);
           console.log('📝 Raw transcript data:', transcriptData);
           
           // Build readable transcript from stored data
-          if (Array.isArray(transcriptData)) {
+          if (Array.isArray(transcriptData) && transcriptData.length > 0) {
             realTranscript = transcriptData.map((event: any) => {
               const speaker = event.participant === 'ai' || event.participant === 'system' ? 'Interviewer (Sarah)' : `Candidate (${sessionData.userName})`;
               return `${speaker}: ${event.content}`;
@@ -184,15 +188,15 @@ const Feedback = () => {
       }
     };
 
-    // Load recording if available
-    const loadRecording = async () => {
-      // Check localStorage for recording
-      const storedRecording = localStorage.getItem(`recording_${sessionData.conversationId}`);
-      const storedMetadata = localStorage.getItem(`recording_${sessionData.conversationId}_metadata`);
+    // Load local recording if available
+    const loadLocalRecording = async () => {
+      // Check localStorage for local recording
+      const storedRecording = localStorage.getItem(`local_recording_${sessionData.conversationId}`);
+      const storedMetadata = localStorage.getItem(`local_recording_${sessionData.conversationId}_metadata`);
       
       if (storedRecording) {
-        setRecordingUrl(storedRecording);
-        console.log('✅ Loaded recording from localStorage');
+        setLocalRecordingUrl(storedRecording);
+        console.log('✅ Loaded local recording from localStorage');
       }
       
       if (storedMetadata) {
@@ -202,7 +206,7 @@ const Feedback = () => {
     };
 
     fetchAnalysis();
-    loadRecording();
+    loadLocalRecording();
   }, [id, sessionData.role, sessionData.userName, sessionData.conversationId]);
 
   const renderCircularProgress = (value: number, size: 'small' | 'large' = 'large') => {
@@ -245,17 +249,17 @@ const Feedback = () => {
   };
 
   const downloadRecording = () => {
-    if (recordingUrl) {
-      if (recordingUrl.startsWith('data:') || recordingUrl.startsWith('blob:')) {
+    if (localRecordingUrl) {
+      if (localRecordingUrl.startsWith('data:') || localRecordingUrl.startsWith('blob:')) {
         // Local recording - trigger download
         const link = document.createElement('a');
-        link.href = recordingUrl;
+        link.href = localRecordingUrl;
         link.download = `interview-recording-${sessionData.conversationId}.${recordingMetadata?.format || 'webm'}`;
         link.click();
         console.log('📹 Downloaded local recording');
       } else {
         // External URL - open in new tab
-        window.open(recordingUrl, '_blank');
+        window.open(localRecordingUrl, '_blank');
         console.log('📹 Opened external recording URL');
       }
     } else {
@@ -266,8 +270,13 @@ const Feedback = () => {
 
   const downloadTranscript = () => {
     const storedTranscript = localStorage.getItem(`transcript_${sessionData.conversationId}`);
-    if (storedTranscript) {
-      const transcriptData = JSON.parse(storedTranscript);
+    const liveTranscript = localStorage.getItem(`live_transcript_${sessionData.conversationId}`);
+    
+    // Use live transcript if available, otherwise use stored transcript
+    const transcriptToUse = liveTranscript || storedTranscript;
+    
+    if (transcriptToUse) {
+      const transcriptData = JSON.parse(transcriptToUse);
       
       if (transcriptData.length === 0) {
         console.warn('⚠️ Transcript is empty');
@@ -346,11 +355,11 @@ TRANSCRIPT:
                 Session Recording
               </h3>
               <div className="bg-black rounded-lg aspect-video flex items-center justify-center mb-4">
-                {recordingUrl ? (
+                {localRecordingUrl ? (
                   <video 
                     controls 
                     className="w-full h-full rounded-lg"
-                    src={recordingUrl}
+                    src={localRecordingUrl}
                   >
                     Your browser does not support the video tag.
                   </video>
@@ -360,13 +369,13 @@ TRANSCRIPT:
                     <p className="text-white/70">Interview Recording</p>
                     <p className="text-white/50 text-sm mt-2">
                       {sessionData.sessionCompleted 
-                        ? 'Recording completed - check downloads folder' 
+                        ? 'Local recording not available - check downloads folder' 
                         : 'Recording in progress'
                       }
                     </p>
                     {recordingMetadata && (
                       <p className="text-white/40 text-xs mt-1">
-                        Format: {recordingMetadata.format || 'webm'} • Source: {recordingMetadata.source || 'Tavus Cloud'}
+                        Format: {recordingMetadata.format || 'webm'} • Source: {recordingMetadata.source || 'Local Capture'}
                         {recordingMetadata.size && ` • Size: ${Math.round(recordingMetadata.size / 1024 / 1024)}MB`}
                       </p>
                     )}
@@ -380,7 +389,7 @@ TRANSCRIPT:
                   className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity"
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  {recordingUrl?.startsWith('http') ? 'View Recording' : 'Download Recording'}
+                  {localRecordingUrl ? 'Download Recording' : 'Recording Not Available'}
                 </button>
                 
                 <button 
