@@ -15,29 +15,32 @@ const generatePersonaInstructions = async (jobTitle: string, userName: string, c
       console.log("Using provided custom instructions");
       let instructions = customInstructions.trim();
       
-      // Ensure the instructions include the user's name
+      // Ensure the instructions include the user's name and Sarah identity
+      if (!instructions.toLowerCase().includes('sarah')) {
+        instructions = `You are Sarah, an AI interview coach. ${instructions}`;
+      }
       if (!instructions.includes(userName)) {
-        instructions = `Hello ${userName}! ${instructions}`;
+        instructions = instructions.replace(/Hello[^.!]*[.!]/, `Hello ${userName}!`);
+        if (!instructions.includes(userName)) {
+          instructions = `Hello ${userName}! ${instructions}`;
+        }
       }
       
       return instructions;
     }
     
-    const prompt = `You are an expert career coach AI named 'Sarah'. Your task is to conduct a mock interview and provide real-time, structured feedback.
+    const prompt = `Create a professional AI interview coach persona named 'Sarah' for conducting mock interviews.
 
-CRITICAL INSTRUCTIONS:
-- Your first line MUST be a friendly and professional greeting to the user by their name, '${userName}'.
-- Your second instruction is to politely ask them to ensure their camera and microphone are on and that their face is centered in the frame for the best experience.
-- The user is practicing for a '${jobTitle}' role. Ask 5-7 relevant behavioral and technical questions one by one.
-- CRITICAL RULE: You can see the user. After each of the user's answers, you must provide a concise, structured analysis. This analysis MUST be a JSON string with the following keys: "strengths" (an array of strings), "areasForImprovement" (an array of strings), and "overallScore" (a number from 0 to 100 for that specific answer).
-- You must also analyze their non-verbal cues. If the user looks away or is out of frame, your next response should include a gentle reminder to stay engaged.
-- Do not use markdown formatting in your responses.
-- Keep your feedback constructive and encouraging while being honest about areas for improvement.
-- End the interview after 5-7 questions with a summary and encouragement.
+REQUIREMENTS:
+- The AI's name is Sarah (never Jane Smith or any other name)
+- She is interviewing ${userName} for a ${jobTitle} position
+- She should greet ${userName} by name in the first interaction
+- She should ask relevant questions for the ${jobTitle} role
+- She should provide constructive feedback after each answer
+- She should analyze both verbal responses and non-verbal cues
+- She should be encouraging but honest in her evaluation
 
-Make the interviewer persona professional, encouraging, and thorough in their evaluation with real-time visual feedback capabilities.
-
-Generate a complete interview script that follows these guidelines for the ${jobTitle} position.`;
+Generate a complete system prompt that establishes Sarah's identity, role, and interview approach for the ${jobTitle} position with ${userName}.`;
     
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -45,11 +48,11 @@ Generate a complete interview script that follows these guidelines for the ${job
   } catch (error) {
     console.error('Error generating persona instructions with Gemini:', error);
     // Fallback instructions if Gemini fails
-    return `Hello ${userName}! I'm Sarah, your AI interview coach. I'm excited to conduct your mock interview for the ${jobTitle} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience. I can see you and will provide feedback on both your verbal answers and non-verbal cues. Let's begin with: Tell me about yourself and why you're interested in this ${jobTitle} role.`;
+    return `You are Sarah, an AI interview coach. Hello ${userName}! I'm excited to conduct your mock interview for the ${jobTitle} position. Please ensure your camera and microphone are on and that your face is centered in the frame for the best experience. I can see you and will provide feedback on both your verbal answers and non-verbal cues. Let's begin with: Tell me about yourself and why you're interested in this ${jobTitle} role.`;
   }
 };
 
-// Enhanced controller function for creating conversations with conversational_context
+// Enhanced controller function for creating conversations with DYNAMIC PERSONA
 export const createConversation = async (
   req: Request,
   res: Response,
@@ -60,12 +63,11 @@ export const createConversation = async (
     
     const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
     const TAVUS_REPLICA_ID = process.env.TAVUS_REPLICA_ID as string;
-    const TAVUS_PERSONA_ID = process.env.TAVUS_PERSONA_ID as string;
     
-    if (!TAVUS_API_KEY || !TAVUS_REPLICA_ID || !TAVUS_PERSONA_ID) {
+    if (!TAVUS_API_KEY || !TAVUS_REPLICA_ID) {
       res.status(500).json({
         success: false,
-        error: 'Server configuration error: Missing API credentials (API_KEY, REPLICA_ID, or PERSONA_ID)'
+        error: 'Server configuration error: Missing API credentials (API_KEY or REPLICA_ID)'
       });
       return;
     }
@@ -86,7 +88,7 @@ export const createConversation = async (
       return;
     }
 
-    console.log("✅ Creating conversation with enhanced persona for:", { jobTitle, userName });
+    console.log("✅ Creating conversation with DYNAMIC persona for:", { jobTitle, userName });
 
     // Step 1: Generate enhanced instructions using Gemini
     console.log("Generating enhanced instructions using Gemini API...");
@@ -98,38 +100,42 @@ export const createConversation = async (
     );
     console.log("Generated instructions:", generatedInstructions.substring(0, 100) + "...");
 
-    // Step 2: Combine with judgment criteria if provided
-    let conversationalContext = generatedInstructions;
+    // Step 2: Create judgment criteria
+    let judgmentCriteria = "Evaluate the candidate based on: 1. Clarity and conciseness of their answer. 2. Use of the STAR (Situation, Task, Action, Result) method for behavioral questions. 3. Confidence and tone of voice. 4. Relevance to the role and industry. 5. Non-verbal communication including eye contact and posture.";
+    
     if (customCriteria && customCriteria.trim()) {
-      const baselineCriteria = "Additionally, evaluate based on: 1. Clarity and conciseness. 2. Use of the STAR method for behavioral questions. 3. Confidence and tone. 4. Relevance to the role. 5. Non-verbal communication including eye contact and posture.";
-      conversationalContext = `${generatedInstructions}\n\nCustom Judgment Criteria: ${customCriteria.trim()}\n\n${baselineCriteria}`;
+      judgmentCriteria = `${customCriteria.trim()} Additionally, ${judgmentCriteria}`;
     }
 
-    console.log("Final conversational context length:", conversationalContext.length);
+    // Step 3: Create DYNAMIC PERSONA first
+    console.log("Creating dynamic persona for this interview session...");
+    const personaResponse = await axios.post(
+      'https://tavusapi.com/v2/personas',
+      {
+        persona_name: `Interview Coach for ${userName} - ${jobTitle}`,
+        system_prompt: generatedInstructions,
+        context: judgmentCriteria,
+        default_replica_id: TAVUS_REPLICA_ID
+      },
+      {
+        headers: { 
+          'x-api-key': TAVUS_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000 
+      }
+    );
 
-    // Step 3: Store session data for later analysis
-    const sessionData = {
-      jobTitle: jobTitle.trim(),
-      userName: userName.trim(),
-      customInstructions: customInstructions?.trim() || null,
-      customCriteria: customCriteria?.trim() || null,
-      feedbackMetrics: feedbackMetrics || {},
-      conversationalContext: conversationalContext,
-      timestamp: new Date().toISOString()
-    };
-    
-    console.log("Session data prepared:", {
-      ...sessionData,
-      conversationalContext: sessionData.conversationalContext.substring(0, 100) + "..."
-    });
+    const dynamicPersonaId = personaResponse.data.persona_id;
+    console.log("✅ Dynamic persona created:", dynamicPersonaId);
 
-    // Step 4: Call Tavus API to create conversation using conversational_context
+    // Step 4: Create conversation with the DYNAMIC persona
+    console.log("Creating conversation with dynamic persona...");
     const conversationResponse = await axios.post(
       'https://tavusapi.com/v2/conversations',
       {
         replica_id: TAVUS_REPLICA_ID,
-        persona_id: TAVUS_PERSONA_ID,
-        conversational_context: conversationalContext, // This is the key fix!
+        persona_id: dynamicPersonaId, // Use the dynamic persona!
         properties: {
           max_call_duration: 1200, // 20 minutes max call duration
           participant_absent_timeout: 300, // 5 minutes timeout for participant absence
@@ -152,18 +158,36 @@ export const createConversation = async (
     }
     
     console.log('✅ Conversation created successfully. URL:', conversation_url, 'ID:', conversation_id);
+
+    // Step 5: Store session data for later analysis and cleanup
+    const sessionData = {
+      jobTitle: jobTitle.trim(),
+      userName: userName.trim(),
+      customInstructions: customInstructions?.trim() || null,
+      customCriteria: customCriteria?.trim() || null,
+      feedbackMetrics: feedbackMetrics || {},
+      dynamicPersonaId: dynamicPersonaId, // Store for cleanup later
+      conversationId: conversation_id,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log("Session data prepared:", {
+      ...sessionData,
+      dynamicPersonaId: dynamicPersonaId
+    });
     
     res.status(200).json({ 
       success: true,
       conversation_url,
       conversation_id,
-      message: 'Interview conversation created successfully',
+      message: 'Interview conversation created successfully with dynamic persona',
       sessionData: {
         jobTitle: sessionData.jobTitle,
         userName: sessionData.userName,
         hasCustomInstructions: !!customInstructions,
         hasCustomCriteria: !!customCriteria,
-        conversationId: conversation_id
+        conversationId: conversation_id,
+        dynamicPersonaId: dynamicPersonaId
       }
     });
 
@@ -187,14 +211,14 @@ export const createConversation = async (
   }
 };
 
-// Function to end conversation and stop credit usage with better error handling
+// Enhanced function to end conversation and cleanup dynamic persona
 export const endConversation = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { conversationId } = req.body;
+    const { conversationId, dynamicPersonaId } = req.body;
     
     const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
     
@@ -214,10 +238,10 @@ export const endConversation = async (
       return;
     }
 
-    console.log("🛑 Ending conversation:", conversationId);
+    console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId });
 
+    // Step 1: End the conversation
     try {
-      // Call Tavus API to delete/end the conversation
       await axios.delete(
         `https://tavusapi.com/v2/conversations/${conversationId}`,
         {
@@ -225,26 +249,37 @@ export const endConversation = async (
             'x-api-key': TAVUS_API_KEY,
             'Content-Type': 'application/json'
           },
-          timeout: 10000 // Shorter timeout to avoid hanging
+          timeout: 10000
         }
       );
-      
       console.log('✅ Conversation ended successfully:', conversationId);
-      
-      res.status(200).json({ 
-        success: true,
-        message: 'Conversation ended successfully'
-      });
-
     } catch (deleteError) {
-      console.warn('⚠️ Error ending conversation on Tavus (may already be ended):', deleteError);
-      
-      // Even if the delete fails, we consider it successful since the goal is to stop using credits
-      res.status(200).json({ 
-        success: true,
-        message: 'Conversation cleanup completed (may have already ended)'
-      });
+      console.warn('⚠️ Error ending conversation (may already be ended):', deleteError);
     }
+
+    // Step 2: Clean up the dynamic persona (optional, to avoid accumulating personas)
+    if (dynamicPersonaId) {
+      try {
+        await axios.delete(
+          `https://tavusapi.com/v2/personas/${dynamicPersonaId}`,
+          {
+            headers: { 
+              'x-api-key': TAVUS_API_KEY,
+              'Content-Type': 'application/json'
+            },
+            timeout: 10000
+          }
+        );
+        console.log('✅ Dynamic persona cleaned up:', dynamicPersonaId);
+      } catch (personaError) {
+        console.warn('⚠️ Error cleaning up persona (may not exist):', personaError);
+      }
+    }
+    
+    res.status(200).json({ 
+      success: true,
+      message: 'Conversation and persona cleanup completed successfully'
+    });
 
   } catch (error) {
     console.error('❌ Error in endConversation:', error);

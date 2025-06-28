@@ -25,7 +25,7 @@ const Setup = () => {
     setError(null);
 
     try {
-      console.log('Creating conversation with:', { 
+      console.log('Creating conversation with dynamic persona:', { 
         jobTitle, 
         userName, 
         customInstructions, 
@@ -67,6 +67,11 @@ const Setup = () => {
       localStorage.setItem('company', company.trim());
       localStorage.setItem('feedbackMetrics', JSON.stringify(feedbackMetrics));
       
+      // Store dynamic persona ID for cleanup
+      if (sessionData.dynamicPersonaId) {
+        localStorage.setItem('dynamicPersonaId', sessionData.dynamicPersonaId);
+      }
+      
       // Store custom instructions and criteria for later use in feedback
       if (customInstructions.trim()) {
         localStorage.setItem('customInstructions', customInstructions.trim());
@@ -97,7 +102,7 @@ const Setup = () => {
             Set Up Your Mock Interview
           </h1>
           <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
-            Configure your interview session to get the most relevant practice experience.
+            Configure your interview session to get the most relevant practice experience with a personalized AI coach.
           </p>
         </div>
 
@@ -163,9 +168,8 @@ const Setup = () => {
                 <h3 className="font-medium text-light-text-primary dark:text-dark-text-primary">AI Interviewer: Sarah</h3>
               </div>
               <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                Your AI interviewer is pre-configured with advanced vision capabilities and will provide real-time feedback on your 
-                answers, body language, and communication skills. She will greet you by name and guide you through a professional 
-                interview experience.
+                Your AI interviewer Sarah will be dynamically configured for your specific role and will greet you by name. 
+                She has advanced vision capabilities and will provide real-time feedback on your answers, body language, and communication skills.
               </p>
             </div>
           </div>
@@ -272,7 +276,7 @@ const Setup = () => {
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Creating Interview...
+                  Creating Dynamic Interview...
                 </>
               ) : (
                 <>

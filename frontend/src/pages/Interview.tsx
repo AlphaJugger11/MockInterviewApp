@@ -6,6 +6,7 @@ const Interview = () => {
   const navigate = useNavigate();
   const [conversationUrl, setConversationUrl] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [dynamicPersonaId, setDynamicPersonaId] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionDuration, setSessionDuration] = useState(0);
@@ -23,13 +24,15 @@ const Interview = () => {
     // Get the conversation data from localStorage
     const url = localStorage.getItem('conversationUrl');
     const id = localStorage.getItem('conversationId');
+    const personaId = localStorage.getItem('dynamicPersonaId');
     const name = localStorage.getItem('userName') || 'User';
     
     if (url && id) {
       setConversationUrl(url);
       setConversationId(id);
+      setDynamicPersonaId(personaId);
       setUserName(name);
-      console.log('Loaded conversation:', { url, id, name });
+      console.log('Loaded conversation:', { url, id, personaId, name });
     } else {
       console.error("No conversation data found. Navigating back to setup.");
       setError("No interview session found. Please set up a new interview.");
@@ -236,18 +239,21 @@ const Interview = () => {
         console.log('✅ Camera and microphone disconnected');
       }
       
-      // Step 4: End conversation on backend to stop credit usage
+      // Step 4: End conversation on backend to stop credit usage and cleanup persona
       if (conversationId) {
         try {
-          console.log('Ending conversation on backend...');
+          console.log('Ending conversation and cleaning up persona on backend...');
           const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId }),
+            body: JSON.stringify({ 
+              conversationId,
+              dynamicPersonaId // Include persona ID for cleanup
+            }),
           });
           
           if (response.ok) {
-            console.log('✅ Conversation ended successfully on backend');
+            console.log('✅ Conversation and persona cleanup completed successfully');
           } else {
             console.warn('⚠️ Failed to end conversation on backend, but continuing...');
           }
@@ -291,7 +297,10 @@ const Interview = () => {
       
       // Use sendBeacon for reliable cleanup on tab close
       if (conversationId) {
-        const data = JSON.stringify({ conversationId });
+        const data = JSON.stringify({ 
+          conversationId,
+          dynamicPersonaId 
+        });
         navigator.sendBeacon('http://localhost:3001/api/interview/end-conversation', data);
       }
       
@@ -318,7 +327,7 @@ const Interview = () => {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
-  }, [conversationId]);
+  }, [conversationId, dynamicPersonaId]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -404,14 +413,14 @@ const Interview = () => {
                     />
                   </div>
                   <p className="text-center text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                    Your AI interviewer Sarah is conducting the interview with {userName}
+                    Your AI interviewer Sarah is conducting a personalized interview with {userName}
                   </p>
                 </div>
               ) : (
                 <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
                   <div className="text-center">
                     <div className="w-12 h-12 bg-white/20 rounded-full animate-pulse mx-auto mb-4"></div>
-                    <p className="text-white/70">Loading interviewer...</p>
+                    <p className="text-white/70">Loading personalized interviewer...</p>
                   </div>
                 </div>
               )}
@@ -509,6 +518,14 @@ const Interview = () => {
                     {streamRef.current ? 'Active' : 'Disconnected'}
                   </span>
                 </div>
+                {dynamicPersonaId && (
+                  <div className="flex justify-between">
+                    <span className="text-light-text-secondary dark:text-dark-text-secondary">Persona:</span>
+                    <span className="text-blue-500 font-medium text-xs">
+                      Dynamic
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
