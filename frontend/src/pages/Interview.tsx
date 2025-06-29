@@ -13,13 +13,14 @@ const Interview = () => {
   const [userName, setUserName] = useState<string>('');
   const [isEnding, setIsEnding] = useState(false);
 
-  // Enhanced recording states for local capture
+  // Enhanced recording states with improved codec support
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
   const [localRecordingUrl, setLocalRecordingUrl] = useState<string | null>(null);
   const [capturedTranscript, setCapturedTranscript] = useState<any[]>([]);
   const [recordingActive, setRecordingActive] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [recordingValidated, setRecordingValidated] = useState(false);
 
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
@@ -65,7 +66,7 @@ const Interview = () => {
     };
   }, [navigate, isEnding, sessionEnded]);
 
-  // Enhanced local recording with automatic start
+  // FIXED: Enhanced local recording with proper codec support
   useEffect(() => {
     const startLocalRecording = async () => {
       if (!conversationId || recordingActive || isEnding || sessionEnded) {
@@ -73,7 +74,7 @@ const Interview = () => {
       }
 
       try {
-        console.log('🎬 Starting local screen recording...');
+        console.log('🎬 Starting local screen recording with improved codec...');
         
         // Request screen capture with audio
         const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -92,17 +93,28 @@ const Interview = () => {
         
         console.log('✅ Screen capture permission granted');
         
-        // Create MediaRecorder with high quality WebM
+        // CRITICAL FIX: Use VP8 codec for better compatibility
+        let mimeType = 'video/webm;codecs=vp8,opus';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'video/webm;codecs=vp9,opus';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm';
+          }
+        }
+        
+        console.log('🎥 Using MIME type:', mimeType);
+        
+        // Create MediaRecorder with compatible codec
         const recorder = new MediaRecorder(stream, {
-          mimeType: 'video/webm;codecs=vp9,opus',
-          videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
-          audioBitsPerSecond: 128000   // 128 kbps for audio
+          mimeType: mimeType,
+          videoBitsPerSecond: 1000000, // Reduced bitrate for stability
+          audioBitsPerSecond: 64000    // Reduced audio bitrate
         });
         
         const chunks: Blob[] = [];
         
         recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
+          if (event.data && event.data.size > 0) {
             chunks.push(event.data);
             console.log('📊 Recording chunk received:', event.data.size, 'bytes');
           }
@@ -110,41 +122,52 @@ const Interview = () => {
         
         recorder.onstop = () => {
           console.log('🛑 Local recording stopped, creating download file...');
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          const url = URL.createObjectURL(blob);
+          const blob = new Blob(chunks, { type: mimeType });
           
-          console.log('✅ Local recording blob created:', blob.size, 'bytes');
-          
-          // Store for immediate download
-          setLocalRecordingUrl(url);
-          setRecordedChunks(chunks);
-          
-          // Store in localStorage for later access
-          localStorage.setItem(`local_recording_${conversationId}`, url);
-          localStorage.setItem(`local_recording_${conversationId}_metadata`, JSON.stringify({
-            format: 'webm',
-            source: 'local_screen_capture',
-            url: url,
-            timestamp: new Date().toISOString(),
-            size: blob.size,
-            duration: sessionDuration,
-            quality: 'high'
-          }));
-          
-          console.log('💾 Local recording saved and ready for download');
+          // CRITICAL: Validate blob before storing
+          if (blob.size > 1000) { // Ensure minimum file size
+            const url = URL.createObjectURL(blob);
+            
+            console.log('✅ Valid recording blob created:', blob.size, 'bytes');
+            
+            // Store for immediate download
+            setLocalRecordingUrl(url);
+            setRecordedChunks(chunks);
+            setRecordingValidated(true);
+            
+            // Store in localStorage for later access
+            localStorage.setItem(`local_recording_${conversationId}`, url);
+            localStorage.setItem(`local_recording_${conversationId}_metadata`, JSON.stringify({
+              format: 'webm',
+              codec: mimeType,
+              source: 'local_screen_capture',
+              url: url,
+              timestamp: new Date().toISOString(),
+              size: blob.size,
+              duration: sessionDuration,
+              quality: 'high',
+              validated: true
+            }));
+            
+            console.log('💾 Valid recording saved and ready for download');
+          } else {
+            console.error('❌ Recording too small, likely corrupted:', blob.size, 'bytes');
+            setRecordingValidated(false);
+          }
         };
         
         recorder.onerror = (event) => {
           console.error('❌ Recording error:', event);
           setRecordingActive(false);
+          setRecordingValidated(false);
         };
         
-        // Start recording
-        recorder.start(1000); // Collect data every second
+        // Start recording with smaller intervals for stability
+        recorder.start(500); // Collect data every 500ms
         setMediaRecorder(recorder);
         setRecordingActive(true);
         
-        console.log('✅ Local screen recording started successfully');
+        console.log('✅ Local screen recording started successfully with codec:', mimeType);
         
         // Handle stream end
         stream.getVideoTracks()[0].addEventListener('ended', () => {
@@ -158,6 +181,7 @@ const Interview = () => {
       } catch (error) {
         console.warn('⚠️ Screen recording not available:', error);
         setRecordingActive(false);
+        setRecordingValidated(false);
         
         if (error instanceof Error && error.name === 'NotAllowedError') {
           console.log('📺 User denied screen sharing permission - continuing with Tavus recording only');
@@ -175,7 +199,7 @@ const Interview = () => {
     }
   }, [conversationId, isRecording, recordingActive, sessionDuration, isEnding, sessionEnded]);
 
-  // Enhanced transcript capture
+  // FIXED: Enhanced transcript capture with real-time monitoring
   useEffect(() => {
     const captureTranscript = async () => {
       if (!conversationId || isEnding || sessionEnded) return;
@@ -191,7 +215,7 @@ const Interview = () => {
           if (data.transcriptEvents && data.transcriptEvents.length > 0) {
             setCapturedTranscript(data.transcriptEvents);
             
-            // Store transcript in localStorage
+            // Store transcript in localStorage immediately
             localStorage.setItem(`live_transcript_${conversationId}`, JSON.stringify(data.transcriptEvents));
             console.log('📝 Live transcript updated:', data.transcriptEvents.length, 'events');
           }
@@ -201,10 +225,14 @@ const Interview = () => {
       }
     };
 
-    // Start transcript capture interval
+    // CRITICAL: Start transcript capture interval every 3 seconds
     if (conversationId && !transcriptIntervalRef.current && !isEnding && !sessionEnded) {
-      transcriptIntervalRef.current = setInterval(captureTranscript, 5000); // Every 5 seconds
-      console.log('📝 Started live transcript capture');
+      // Initial capture
+      captureTranscript();
+      
+      // Set up interval
+      transcriptIntervalRef.current = setInterval(captureTranscript, 3000); // Every 3 seconds
+      console.log('📝 Started live transcript capture every 3 seconds');
     }
 
     return () => {
@@ -273,8 +301,9 @@ const Interview = () => {
         jobTitle: localStorage.getItem('jobTitle'),
         company: localStorage.getItem('company'),
         localRecordingUrl: localRecordingUrl,
-        hasLocalRecording: !!localRecordingUrl,
-        transcriptLength: finalTranscript.length
+        hasLocalRecording: recordingValidated,
+        transcriptLength: finalTranscript.length,
+        recordingValidated: recordingValidated
       };
       
       localStorage.setItem(`session_${conversationId}`, JSON.stringify(finalSessionData));
@@ -282,20 +311,20 @@ const Interview = () => {
       
       console.log('💾 Final session data stored');
 
-      // Step 4: Force download transcript immediately
+      // Step 4: Force download transcript immediately if available
       if (finalTranscript.length > 0) {
         downloadTranscriptFile(finalTranscript);
       } else {
         console.warn('⚠️ No transcript available for download');
-        alert('No transcript was captured during the session.');
+        alert('No transcript was captured during the session. Please check if the conversation was recorded properly.');
       }
 
-      // Step 5: Force download recording if available
-      if (localRecordingUrl) {
+      // Step 5: Force download recording if available and validated
+      if (localRecordingUrl && recordingValidated) {
         downloadRecordingFile();
       } else {
-        console.warn('⚠️ No local recording available for download');
-        alert('No local recording was captured. Only Tavus cloud recording is available.');
+        console.warn('⚠️ No valid local recording available for download');
+        alert('No valid local recording was captured. Only Tavus cloud recording may be available.');
       }
 
       // Step 6: End conversation on backend (non-blocking)
@@ -499,7 +528,8 @@ TRANSCRIPT:
               {isRecording && !isEnding && !sessionEnded && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
                   Recording • {formatDuration(sessionDuration)} • 
-                  {recordingActive ? ' Local + Cloud Recording' : ' Cloud Recording Only'}
+                  {recordingActive && recordingValidated ? ' Local + Cloud Recording' : 
+                   recordingActive ? ' Local Recording (Processing)' : ' Cloud Recording Only'}
                 </span>
               )}
             </div>
@@ -543,9 +573,15 @@ TRANSCRIPT:
                     <span>Tavus Cloud Recording</span>
                   </div>
                   {recordingActive && (
-                    <div className="inline-flex items-center space-x-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full text-sm">
-                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                      <span>Local Recording Active</span>
+                    <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
+                      recordingValidated 
+                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' 
+                        : 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
+                    }`}>
+                      <div className={`w-2 h-2 rounded-full animate-pulse ${
+                        recordingValidated ? 'bg-blue-500' : 'bg-yellow-500'
+                      }`}></div>
+                      <span>{recordingValidated ? 'Local Recording Active' : 'Local Recording Processing'}</span>
                     </div>
                   )}
                   {capturedTranscript.length > 0 && (
@@ -587,8 +623,12 @@ TRANSCRIPT:
             </div>
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
-              <span className="text-green-500 font-medium">
-                {recordingActive ? 'Local + Cloud' : 'Cloud Only'}
+              <span className={`font-medium ${
+                recordingActive && recordingValidated ? 'text-green-500' : 
+                recordingActive ? 'text-yellow-500' : 'text-blue-500'
+              }`}>
+                {recordingActive && recordingValidated ? 'Local + Cloud' : 
+                 recordingActive ? 'Processing' : 'Cloud Only'}
               </span>
             </div>
             <div className="flex justify-between">
@@ -611,14 +651,19 @@ TRANSCRIPT:
             </div>
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Local Recording:</span>
-              <span className={`font-medium text-xs ${recordingActive ? 'text-green-500' : 'text-gray-500'}`}>
-                {recordingActive ? 'Active' : 'Not Started'}
+              <span className={`font-medium text-xs ${
+                recordingValidated ? 'text-green-500' : 
+                recordingActive ? 'text-yellow-500' : 'text-gray-500'
+              }`}>
+                {recordingValidated ? 'Validated' : recordingActive ? 'Processing' : 'Not Started'}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Download Ready:</span>
-              <span className={`font-medium text-xs ${localRecordingUrl ? 'text-green-500' : 'text-yellow-500'}`}>
-                {localRecordingUrl ? 'Yes' : 'Processing...'}
+              <span className={`font-medium text-xs ${
+                recordingValidated && capturedTranscript.length > 0 ? 'text-green-500' : 'text-yellow-500'
+              }`}>
+                {recordingValidated && capturedTranscript.length > 0 ? 'Yes' : 'Processing...'}
               </span>
             </div>
           </div>
@@ -626,20 +671,26 @@ TRANSCRIPT:
           {/* Download Info */}
           <div className="mt-4 p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
             <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
-              Download Information
+              Recording & Download Information
             </h4>
             <ul className="text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
-              <li>• Local screen recording captures your full interview session</li>
-              <li>• Real-time transcript is captured every 5 seconds</li>
-              <li>• Both files will automatically download when you end the session</li>
-              <li>• Files are saved locally on your machine for privacy</li>
-              <li>• Transcript format: .txt file with timestamps</li>
-              <li>• Recording format: .webm file (high quality)</li>
+              <li>• Local screen recording uses VP8 codec for maximum compatibility</li>
+              <li>• Real-time transcript captured every 3 seconds during conversation</li>
+              <li>• Both files automatically download when you end the session</li>
+              <li>• Files saved locally on your machine for privacy</li>
+              <li>• Transcript format: .txt file with timestamps and speaker identification</li>
+              <li>• Recording format: .webm file (compatible with most players)</li>
               {!recordingActive && !isEnding && !sessionEnded && (
-                <li className="text-yellow-600 dark:text-yellow-400">• Local recording will start automatically</li>
+                <li className="text-yellow-600 dark:text-yellow-400">• Local recording will start automatically after screen share</li>
               )}
-              {recordingActive && (
-                <li className="text-green-600 dark:text-green-400">• ✅ Local recording is active and capturing</li>
+              {recordingActive && !recordingValidated && (
+                <li className="text-yellow-600 dark:text-yellow-400">• ⏳ Local recording is processing and validating...</li>
+              )}
+              {recordingValidated && (
+                <li className="text-green-600 dark:text-green-400">• ✅ Local recording is active and validated</li>
+              )}
+              {capturedTranscript.length > 0 && (
+                <li className="text-green-600 dark:text-green-400">• ✅ Transcript capture is working ({capturedTranscript.length} events)</li>
               )}
             </ul>
           </div>

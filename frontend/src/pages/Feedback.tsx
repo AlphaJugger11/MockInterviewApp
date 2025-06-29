@@ -377,6 +377,7 @@ TRANSCRIPT:
                       <p className="text-white/40 text-xs mt-1">
                         Format: {recordingMetadata.format || 'webm'} • Source: {recordingMetadata.source || 'Local Capture'}
                         {recordingMetadata.size && ` • Size: ${Math.round(recordingMetadata.size / 1024 / 1024)}MB`}
+                        {recordingMetadata.validated && ' • Validated ✓'}
                       </p>
                     )}
                   </div>

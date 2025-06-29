@@ -5,7 +5,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
 
-// Global storage for webhook data (in production, use a database)
+// CRITICAL: Global storage for webhook data (in production, use a database)
 declare global {
   var conversationTranscripts: Record<string, any>;
   var conversationRecordings: Record<string, any>;
@@ -155,8 +155,8 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Create conversation with RECORDING ENABLED
-    console.log("Creating conversation with RECORDING ENABLED...");
+    // Step 4: Create conversation with RECORDING AND TRANSCRIPTION ENABLED
+    console.log("Creating conversation with RECORDING AND TRANSCRIPTION ENABLED...");
     
     try {
       const conversationResponse = await axios.post(
@@ -340,7 +340,7 @@ IMPORTANT REMINDERS:
   }
 };
 
-// Enhanced endpoint to get conversation data with VERBOSE MODE
+// FIXED: Enhanced endpoint to get conversation data with VERBOSE MODE
 export const getConversation = async (
   req: Request,
   res: Response,
@@ -481,7 +481,7 @@ export const getConversation = async (
   }
 };
 
-// Enhanced webhook endpoint to receive conversation transcripts and recordings
+// FIXED: Enhanced webhook endpoint to receive conversation transcripts and recordings
 export const conversationCallback = async (
   req: Request,
   res: Response,
@@ -665,7 +665,7 @@ export const endConversation = async (
   }
 };
 
-// Enhanced function to analyze interview using REAL conversation data with FIXED sessionId
+// FIXED: Enhanced function to analyze interview using REAL conversation data with FIXED sessionId
 export const analyzeInterview = async (
   req: Request,
   res: Response,
