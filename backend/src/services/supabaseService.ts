@@ -20,7 +20,7 @@ export const RECORDINGS_BUCKET = 'interview-recordings';
 export const TRANSCRIPTS_BUCKET = 'interview-transcripts';
 
 /**
- * Initialize storage buckets if they don't exist
+ * Initialize storage buckets if they don't exist (FIXED)
  */
 export const initializeStorageBuckets = async (): Promise<void> => {
   try {
@@ -31,8 +31,8 @@ export const initializeStorageBuckets = async (): Promise<void> => {
       console.log('📦 Creating recordings bucket...');
       const { error: createRecordingsError } = await supabase.storage.createBucket(RECORDINGS_BUCKET, {
         public: false,
-        allowedMimeTypes: ['video/webm', 'video/mp4'],
-        fileSizeLimit: 1024 * 1024 * 500 // 500MB limit
+        allowedMimeTypes: ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4'],
+        fileSizeLimit: 1024 * 1024 * 1024 // FIXED: 1GB limit instead of 500MB
       });
       
       if (createRecordingsError) {
@@ -42,6 +42,8 @@ export const initializeStorageBuckets = async (): Promise<void> => {
       }
     } else if (!recordingsError) {
       console.log('✅ Recordings bucket already exists');
+    } else {
+      console.error('❌ Error checking recordings bucket:', recordingsError);
     }
 
     // Check if transcripts bucket exists
@@ -52,7 +54,7 @@ export const initializeStorageBuckets = async (): Promise<void> => {
       const { error: createTranscriptsError } = await supabase.storage.createBucket(TRANSCRIPTS_BUCKET, {
         public: false,
         allowedMimeTypes: ['text/plain', 'application/json'],
-        fileSizeLimit: 1024 * 1024 * 10 // 10MB limit
+        fileSizeLimit: 1024 * 1024 * 50 // 50MB limit for transcripts
       });
       
       if (createTranscriptsError) {
@@ -62,6 +64,8 @@ export const initializeStorageBuckets = async (): Promise<void> => {
       }
     } else if (!transcriptsError) {
       console.log('✅ Transcripts bucket already exists');
+    } else {
+      console.error('❌ Error checking transcripts bucket:', transcriptsError);
     }
 
   } catch (error) {
@@ -70,7 +74,7 @@ export const initializeStorageBuckets = async (): Promise<void> => {
 };
 
 /**
- * Upload recording file to Supabase Storage
+ * Upload recording file to Supabase Storage (FIXED)
  */
 export const uploadRecording = async (
   conversationId: string,
@@ -79,9 +83,21 @@ export const uploadRecording = async (
   mimeType: string = 'video/webm'
 ): Promise<{ success: boolean; url?: string; error?: string }> => {
   try {
-    const fileName = `${conversationId}/${userName}-${Date.now()}.webm`;
+    // FIXED: Better file extension detection
+    let extension = 'webm';
+    if (mimeType.includes('mp4')) {
+      extension = 'mp4';
+    } else if (mimeType.includes('webm')) {
+      extension = 'webm';
+    }
     
-    console.log('📤 Uploading recording to Supabase:', fileName);
+    const fileName = `${conversationId}/${userName}-${Date.now()}.${extension}`;
+    
+    console.log('📤 Uploading recording to Supabase:', {
+      fileName,
+      size: fileBuffer.length,
+      mimeType
+    });
     
     const { data, error } = await supabase.storage
       .from(RECORDINGS_BUCKET)

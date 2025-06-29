@@ -5,17 +5,32 @@ import { validateInterviewRequest, validateConversationRequest } from '../middle
 
 const router = express.Router();
 
-// Configure multer for file uploads
+// Configure multer for file uploads with FIXED file filter
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 500 * 1024 * 1024, // 500MB limit
   },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('video/') || file.mimetype.startsWith('audio/')) {
+    console.log('📁 File upload attempt:', {
+      fieldname: file.fieldname,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size
+    });
+    
+    // FIXED: Accept WebM video files specifically
+    if (file.mimetype.startsWith('video/') || 
+        file.mimetype.startsWith('audio/') ||
+        file.mimetype === 'video/webm' ||
+        file.mimetype === 'video/mp4' ||
+        file.mimetype === 'audio/webm' ||
+        file.mimetype === 'audio/mp4') {
+      console.log('✅ File type accepted:', file.mimetype);
       cb(null, true);
     } else {
-      cb(new Error('Only video and audio files are allowed'));
+      console.error('❌ File type rejected:', file.mimetype);
+      cb(new Error(`File type not allowed: ${file.mimetype}. Only video and audio files are accepted.`));
     }
   }
 });
@@ -35,7 +50,7 @@ router.post('/analyze', analyzeInterview);
 // POST /api/interview/conversation-callback - Webhook for conversation transcripts
 router.post('/conversation-callback', conversationCallback);
 
-// POST /api/interview/upload-recording - Upload recording to Supabase
+// POST /api/interview/upload-recording - Upload recording to Supabase (FIXED)
 router.post('/upload-recording', upload.single('recording'), uploadRecordingFile);
 
 // POST /api/interview/upload-transcript - Upload transcript to Supabase

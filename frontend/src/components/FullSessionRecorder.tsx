@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Square, Download, Upload, Trash2 } from 'lucide-react';
+import { Play, Square, Download, Upload, Trash2, AlertCircle } from 'lucide-react';
 import { uploadRecordingToSupabase } from '../services/supabaseClient';
 
 interface FullSessionRecorderProps {
@@ -23,6 +23,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
   const [supabaseUrl, setSupabaseUrl] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [transcript, setTranscript] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -34,6 +35,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
   // Start recording function
   const startRecording = async () => {
     try {
+      setError(null);
       console.log('🎬 Starting client-side recording...');
       
       // Get screen capture with audio
@@ -97,6 +99,8 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         }
       }
 
+      console.log('🎥 Using MIME type:', mimeType);
+
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: mimeType,
         videoBitsPerSecond: 2000000, // 2MB/s for high quality
@@ -115,6 +119,12 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       mediaRecorder.onstop = async () => {
         console.log('🛑 Recording stopped, processing...');
         const blob = new Blob(chunksRef.current, { type: mimeType });
+        
+        console.log('📊 Final blob details:', {
+          size: blob.size,
+          type: blob.type,
+          chunks: chunksRef.current.length
+        });
         
         if (blob.size > 1000) { // Ensure minimum file size
           setRecordedBlob(blob);
@@ -145,12 +155,14 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
           }
         } else {
           console.error('❌ Recording too small, likely corrupted');
+          setError('Recording failed - file too small. Please try again.');
           setUploadStatus('error');
         }
       };
 
       mediaRecorder.onerror = (event) => {
         console.error('❌ MediaRecorder error:', event);
+        setError('Recording error occurred. Please try again.');
         setUploadStatus('error');
       };
 
@@ -178,6 +190,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
     } catch (error) {
       console.error('❌ Error starting recording:', error);
+      setError('Failed to start recording. Please check permissions and try again.');
       setUploadStatus('error');
     }
   };
@@ -232,13 +245,20 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
     transcriptIntervalRef.current = setInterval(captureTranscript, 3000);
   };
 
-  // Upload to Supabase
+  // Upload to Supabase (FIXED)
   const uploadToSupabase = async (blob: Blob) => {
     setIsUploading(true);
     setUploadStatus('uploading');
 
     try {
       console.log('☁️ Uploading to Supabase Storage...');
+      console.log('📊 Blob details for upload:', {
+        size: blob.size,
+        type: blob.type,
+        conversationId,
+        userName
+      });
+      
       const result = await uploadRecordingToSupabase(conversationId, userName, blob);
       
       if (result.success && result.url) {
@@ -253,6 +273,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       }
     } catch (error) {
       console.error('❌ Upload failed:', error);
+      setError(`Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setUploadStatus('error');
     } finally {
       setIsUploading(false);
@@ -314,6 +335,14 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
         Client-Side Recording System
       </h3>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center space-x-2">
+          <AlertCircle className="h-4 w-4 text-red-500" />
+          <span className="text-red-600 dark:text-red-400 text-sm">{error}</span>
+        </div>
+      )}
 
       {/* Recording Controls */}
       <div className="flex items-center space-x-4 mb-4">
@@ -403,7 +432,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
             className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
           >
             <Upload className="h-4 w-4 mr-2" />
-            Upload to Supabase
+            Retry Upload
           </button>
         )}
 
@@ -433,6 +462,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         <p>• Files automatically uploaded to Supabase Storage</p>
         <p>• Recordings deleted after session for storage optimization</p>
         <p>• Transcript captured in real-time for AI analysis</p>
+        <p>• WebM format with VP8/VP9 codec for maximum compatibility</p>
       </div>
     </div>
   );

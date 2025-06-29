@@ -12,7 +12,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Upload recording blob to Supabase Storage via backend
+ * Upload recording blob to Supabase Storage via backend (FIXED)
  */
 export const uploadRecordingToSupabase = async (
   conversationId: string,
@@ -21,10 +21,35 @@ export const uploadRecordingToSupabase = async (
 ): Promise<{ success: boolean; url?: string; error?: string }> => {
   try {
     console.log('📤 Uploading recording to Supabase via backend...');
+    console.log('📊 Upload details:', {
+      conversationId,
+      userName,
+      blobSize: recordingBlob.size,
+      blobType: recordingBlob.type
+    });
     
     // Create FormData to send the blob
     const formData = new FormData();
-    formData.append('recording', recordingBlob, `${userName}-${Date.now()}.webm`);
+    
+    // FIXED: Ensure proper file extension and MIME type
+    let fileName = `${userName}-${Date.now()}`;
+    let fileExtension = 'webm';
+    
+    if (recordingBlob.type.includes('mp4')) {
+      fileExtension = 'mp4';
+    } else if (recordingBlob.type.includes('webm')) {
+      fileExtension = 'webm';
+    }
+    
+    fileName = `${fileName}.${fileExtension}`;
+    
+    console.log('📁 File details:', {
+      fileName,
+      fileExtension,
+      mimeType: recordingBlob.type
+    });
+    
+    formData.append('recording', recordingBlob, fileName);
     formData.append('conversationId', conversationId);
     formData.append('userName', userName);
     
@@ -33,9 +58,20 @@ export const uploadRecordingToSupabase = async (
       body: formData
     });
     
+    console.log('📡 Upload response status:', response.status);
+    
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Upload failed');
+      const errorText = await response.text();
+      console.error('❌ Upload response error:', errorText);
+      
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Upload failed' };
+      }
+      
+      throw new Error(errorData.error || `HTTP ${response.status}: Upload failed`);
     }
     
     const data = await response.json();
