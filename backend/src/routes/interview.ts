@@ -17,7 +17,7 @@ import { validateInterviewRequest, validateConversationRequest } from '../middle
 
 const router = express.Router();
 
-// Configure multer for file uploads with FIXED file filter
+// Configure multer for file uploads with FIXED file filter for WebM files
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -31,50 +31,61 @@ const upload = multer({
       size: file.size
     });
     
-    // FIXED: Accept WebM video files specifically
-    if (file.mimetype.startsWith('video/') || 
-        file.mimetype.startsWith('audio/') ||
-        file.mimetype === 'video/webm' ||
-        file.mimetype === 'video/mp4' ||
-        file.mimetype === 'audio/webm' ||
-        file.mimetype === 'audio/mp4') {
-      console.log('✅ File type accepted:', file.mimetype);
+    // FIXED: Accept WebM video files specifically and handle MIME type issues
+    const allowedMimeTypes = [
+      'video/webm',
+      'video/mp4',
+      'audio/webm',
+      'audio/mp4',
+      'video/x-msvideo', // .avi
+      'video/quicktime'  // .mov
+    ];
+    
+    // CRITICAL FIX: Handle cases where MIME type might be incorrectly detected
+    const isVideoFile = file.mimetype.startsWith('video/') || 
+                       file.mimetype.startsWith('audio/') ||
+                       allowedMimeTypes.includes(file.mimetype) ||
+                       file.originalname.toLowerCase().endsWith('.webm') ||
+                       file.originalname.toLowerCase().endsWith('.mp4');
+    
+    if (isVideoFile) {
+      console.log('✅ File type accepted:', file.mimetype, 'Original name:', file.originalname);
       cb(null, true);
     } else {
-      console.error('❌ File type rejected:', file.mimetype);
-      cb(new Error(`File type not allowed: ${file.mimetype}. Only video and audio files are accepted.`));
+      console.error('❌ File type rejected:', file.mimetype, 'Original name:', file.originalname);
+      cb(new Error(`File type not allowed: ${file.mimetype}. Only video and audio files are accepted. Supported formats: WebM, MP4.`));
     }
   }
 });
 
-// POST /api/interview/create-conversation - Enhanced dynamic persona endpoint WITHOUT S3 recording
+// POST /api/interview/create-conversation - Enhanced conversation endpoint with webhook transcription
 router.post('/create-conversation', validateConversationRequest, createConversation);
 
-// GET /api/interview/get-conversation/:conversationId - Get conversation data
+// GET /api/interview/get-conversation/:conversationId - Get conversation data with webhook transcript
 router.get('/get-conversation/:conversationId', getConversation);
 
-// POST /api/interview/end-conversation - Endpoint to terminate sessions with user session management
+// POST /api/interview/end-conversation - Endpoint to terminate sessions with cleanup
 router.post('/end-conversation', endConversation);
 
-// POST /api/interview/analyze - Endpoint for AI-powered analysis with real data
+// POST /api/interview/analyze - Endpoint for AI-powered analysis with real webhook data
 router.post('/analyze', analyzeInterview);
 
-// POST /api/interview/conversation-callback - Webhook for conversation transcripts
+// POST /api/interview/conversation-callback - CRITICAL: Webhook for conversation transcripts from Tavus
 router.post('/conversation-callback', conversationCallback);
 
-// POST /api/interview/upload-recording - Upload recording to Supabase (temporary storage)
+// POST /api/interview/upload-recording - Upload recording to Supabase (FIXED file handling)
 router.post('/upload-recording', upload.single('recording'), uploadRecordingFile);
 
-// POST /api/interview/upload-transcript - Upload transcript to Supabase (temporary storage)
+// POST /api/interview/upload-transcript - Upload transcript to Supabase
 router.post('/upload-transcript', uploadTranscriptFile);
 
-// GET /api/interview/download-urls/:conversationId - Get download URLs for temporary files
+// GET /api/interview/download-urls/:conversationId - Get download URLs for session files
 router.get('/download-urls/:conversationId', getDownloadUrls);
 
 // GET /api/interview/user-transcripts/:userId - Get user transcripts (persistent storage)
 router.get('/user-transcripts/:userId', getUserTranscripts);
 
-// DELETE /api/interview/delete-recording/:conversationId - Delete recording from Supabase (temporary storage)
+// DELETE /api/interview/delete-recording/:conversationId - Delete recording from Supabase
 router.delete('/delete-recording/:conversationId', deleteRecordingFile);
 
 // POST /api/interview/start - Legacy endpoint

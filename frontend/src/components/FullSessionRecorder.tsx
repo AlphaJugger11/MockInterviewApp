@@ -111,7 +111,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
       streamRef.current = combinedStream;
 
-      // STEP 4: Set up MediaRecorder with optimized settings
+      // STEP 4: Set up MediaRecorder with optimized settings for Supabase 50MB limit
       let mimeType = 'video/webm;codecs=vp8,opus';
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         mimeType = 'video/webm;codecs=vp9,opus';
@@ -122,10 +122,11 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
       console.log('🎥 Using MIME type:', mimeType);
 
+      // OPTIMIZED: Lower bitrates to stay under 50MB limit
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: mimeType,
-        videoBitsPerSecond: 1000000, // 1MB/s for video
-        audioBitsPerSecond: 128000   // 128KB/s for audio (higher for better quality)
+        videoBitsPerSecond: 500000,  // REDUCED: 500KB/s for video (was 1MB/s)
+        audioBitsPerSecond: 64000    // 64KB/s for audio
       });
 
       chunksRef.current = [];
@@ -207,7 +208,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
             });
           }
         } else {
-          console.error('❌ Recording too small, likely corrupted');
+          console.error('❌ Recording too small, likely corrupted:', blob.size, 'bytes');
           setError('Recording failed - file too small. Please try again.');
           setUploadStatus('error');
         }
@@ -220,7 +221,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       };
 
       // Start recording with larger intervals for smaller file size
-      mediaRecorder.start(2000); // Collect data every 2 seconds
+      mediaRecorder.start(3000); // INCREASED: Collect data every 3 seconds (was 2s)
       mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
       setRecordingDuration(0);
@@ -271,7 +272,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
     console.log('🛑 Recording stopped');
   };
 
-  // Start transcript capture
+  // Start transcript capture from webhook
   const startTranscriptCapture = () => {
     const captureTranscript = async () => {
       try {
@@ -285,6 +286,11 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
             if (onTranscriptUpdate) {
               onTranscriptUpdate(data.transcriptEvents);
             }
+            
+            // Check if this is webhook data
+            if (data.hasWebhookData) {
+              console.log('📝 Using REAL webhook transcript data:', data.transcriptEvents.length, 'events');
+            }
           }
         }
       } catch (error) {
@@ -296,10 +302,10 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
     captureTranscript();
     
     // Set up interval
-    transcriptIntervalRef.current = setInterval(captureTranscript, 3000);
+    transcriptIntervalRef.current = setInterval(captureTranscript, 5000); // Every 5 seconds
   };
 
-  // Upload to Supabase with size check
+  // Upload to Supabase with FIXED MIME type handling
   const uploadToSupabase = async (blob: Blob) => {
     setIsUploading(true);
     setUploadStatus('uploading');
@@ -320,7 +326,14 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         throw new Error(`File too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum allowed: 50MB for Supabase free tier.`);
       }
       
-      const result = await uploadRecordingToSupabase(conversationId, userName, blob);
+      // FIXED: Create a new blob with proper MIME type if needed
+      let uploadBlob = blob;
+      if (!blob.type || blob.type === 'text/plain') {
+        console.log('🔧 Fixing MIME type for upload...');
+        uploadBlob = new Blob([blob], { type: 'video/webm' });
+      }
+      
+      const result = await uploadRecordingToSupabase(conversationId, userName, uploadBlob);
       
       if (result.success && result.url) {
         setSupabaseUrl(result.url);
@@ -403,15 +416,15 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
   return (
     <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border">
       <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-        Client-Side Recording System with Enhanced Audio
+        Client-Side Recording System with Webhook Transcription
       </h3>
 
-      {/* Audio Capture Info */}
+      {/* Enhanced Audio Capture Info */}
       <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg flex items-start space-x-2">
         <Volume2 className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
         <div className="text-green-600 dark:text-green-400 text-sm">
-          <p className="font-medium">Enhanced Audio Capture Enabled</p>
-          <p>Recording will capture both system audio (AI voice) and microphone audio for complete interview recording.</p>
+          <p className="font-medium">Enhanced Audio + Webhook Transcription</p>
+          <p>Recording captures system audio (AI voice) + microphone. Transcript captured via Tavus webhook for real conversation data.</p>
         </div>
       </div>
 
@@ -419,8 +432,8 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start space-x-2">
         <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
         <div className="text-blue-600 dark:text-blue-400 text-sm">
-          <p className="font-medium">Supabase Free Tier Limit: 50MB per file</p>
-          <p>Recording optimized for smaller file size. Large recordings will be available for local download only.</p>
+          <p className="font-medium">Optimized for Supabase 50MB Limit</p>
+          <p>Recording bitrate reduced for smaller files. Webhook provides REAL transcript data for accurate AI analysis.</p>
         </div>
       </div>
 
@@ -569,7 +582,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       {transcript.length > 0 && (
         <div className="mt-4 p-3 bg-light-primary dark:bg-dark-primary rounded-lg">
           <p className="text-sm text-light-text-primary dark:text-dark-text-primary">
-            📝 Transcript captured: {transcript.length} events
+            📝 Webhook transcript captured: {transcript.length} events (REAL conversation data)
           </p>
         </div>
       )}
@@ -577,13 +590,14 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       {/* Recording Info */}
       <div className="mt-4 text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
         <p>• Enhanced audio capture: System audio (AI voice) + Microphone audio</p>
-        <p>• Recording optimized for Supabase 50MB limit (reduced resolution/bitrate)</p>
+        <p>• WEBHOOK TRANSCRIPTION: Real conversation data captured from Tavus</p>
+        <p>• Recording optimized for Supabase 50MB limit (reduced bitrate)</p>
         <p>• Files larger than 50MB available for local download only</p>
         <p>• Automatic upload to Supabase Storage for files under 50MB</p>
-        <p>• Recordings deleted from cloud after session for storage optimization</p>
-        <p>• Transcript captured in real-time for AI analysis</p>
+        <p>• AI analysis uses REAL webhook transcript data for accurate feedback</p>
         <p>• WebM format with VP8/VP9 codec for maximum compatibility</p>
         <p>• System audio capture ensures you can hear the AI interviewer in recordings</p>
+        <p>• Webhook provides complete conversation transcript for analysis</p>
       </div>
     </div>
   );

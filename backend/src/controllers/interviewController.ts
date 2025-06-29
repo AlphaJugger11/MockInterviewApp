@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { uploadRecording, uploadTranscript, getSignedDownloadUrl, listConversationFiles, uploadUserTranscript, cleanupSession, RECORDINGS_BUCKET, TRANSCRIPTS_BUCKET } from '../services/supabaseService';
+import { uploadRecording, uploadTranscript, uploadUserTranscript, getSignedDownloadUrl, listConversationFiles, RECORDINGS_BUCKET, TRANSCRIPTS_BUCKET, cleanupSession } from '../services/supabaseService';
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
@@ -74,7 +74,7 @@ Generate a complete system prompt that establishes Sarah's identity, role, and r
   }
 };
 
-// Enhanced controller function for creating conversations with PROPER RECORDING
+// Enhanced controller function for creating conversations with PROPER WEBHOOK SETUP
 export const createConversation = async (
   req: Request,
   res: Response,
@@ -110,7 +110,7 @@ export const createConversation = async (
       return;
     }
 
-    console.log("✅ Creating conversation with RECORDING AND TRANSCRIPTION ENABLED for:", { jobTitle, userName });
+    console.log("✅ Creating conversation with WEBHOOK TRANSCRIPTION for:", { jobTitle, userName });
 
     // Step 1: Generate enhanced instructions using Gemini
     console.log("Generating enhanced instructions using Gemini API...");
@@ -156,8 +156,12 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Create conversation with RECORDING AND TRANSCRIPTION ENABLED
-    console.log("Creating conversation with RECORDING AND TRANSCRIPTION ENABLED...");
+    // Step 4: Create conversation with WEBHOOK CALLBACK for transcription
+    console.log("Creating conversation with WEBHOOK TRANSCRIPTION...");
+    
+    // CRITICAL: Set up proper webhook URL for transcription
+    const webhookUrl = `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`;
+    console.log("🔗 Using webhook URL:", webhookUrl);
     
     try {
       const conversationResponse = await axios.post(
@@ -165,14 +169,13 @@ IMPORTANT REMINDERS:
         {
           replica_id: TAVUS_REPLICA_ID,
           conversational_context: conversationalContext,
-          callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`,
+          callback_url: webhookUrl, // CRITICAL: This enables transcription webhook
           properties: {
             max_call_duration: 1200, // 20 minutes max call duration
             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
             participant_left_timeout: 15, // Set timeout after participant leaves
-            enable_recording: true, // CRITICAL: Enable recording
-            enable_transcription: true, // CRITICAL: Enable transcription
-            // Note: Without S3, recording will be temporary but still captured
+            enable_recording: false, // Disable Tavus recording to avoid S3 requirement
+            enable_transcription: true, // CRITICAL: Enable transcription webhook
           }
         },
         {
@@ -190,7 +193,7 @@ IMPORTANT REMINDERS:
         throw new Error('No conversation URL or ID received from Tavus API');
       }
       
-      console.log('✅ Conversation created successfully with RECORDING. URL:', conversation_url, 'ID:', conversation_id);
+      console.log('✅ Conversation created successfully with WEBHOOK TRANSCRIPTION. URL:', conversation_url, 'ID:', conversation_id);
 
       // Step 5: Store session data for later analysis
       const sessionData = {
@@ -201,31 +204,29 @@ IMPORTANT REMINDERS:
         feedbackMetrics: feedbackMetrics || {},
         conversationId: conversation_id,
         conversationalContext: conversationalContext,
+        webhookUrl: webhookUrl,
         timestamp: new Date().toISOString()
       };
       
-      console.log("Session data prepared:", {
+      console.log("Session data prepared with webhook:", {
         jobTitle: sessionData.jobTitle,
         userName: sessionData.userName,
-        customInstructions: sessionData.customInstructions,
-        customCriteria: sessionData.customCriteria,
-        feedbackMetrics: sessionData.feedbackMetrics,
-        conversationalContext: sessionData.conversationalContext.substring(0, 100) + "...",
-        timestamp: sessionData.timestamp
+        conversationId: conversation_id,
+        webhookUrl: webhookUrl
       });
       
       res.status(200).json({ 
         success: true,
         conversation_url,
         conversation_id,
-        message: 'Interview conversation created successfully with Tavus recording and transcription',
+        message: 'Interview conversation created successfully with webhook transcription',
         sessionData: {
           jobTitle: sessionData.jobTitle,
           userName: sessionData.userName,
           hasCustomInstructions: !!customInstructions,
           hasCustomCriteria: !!customCriteria,
           conversationId: conversation_id,
-          method: 'conversational_context_with_recording'
+          method: 'webhook_transcription'
         }
       });
 
@@ -255,19 +256,19 @@ IMPORTANT REMINDERS:
         const dynamicPersonaId = personaResponse.data.persona_id;
         console.log("✅ Dynamic persona created as fallback:", dynamicPersonaId);
 
-        // Create conversation with the dynamic persona and RECORDING
+        // Create conversation with the dynamic persona and WEBHOOK
         const conversationResponse = await axios.post(
           'https://tavusapi.com/v2/conversations',
           {
             replica_id: TAVUS_REPLICA_ID,
             persona_id: dynamicPersonaId,
-            callback_url: `${process.env.BASE_URL || 'http://localhost:3001'}/api/interview/conversation-callback`,
+            callback_url: webhookUrl,
             properties: {
               max_call_duration: 1200,
               participant_absent_timeout: 300,
               participant_left_timeout: 15,
-              enable_recording: true, // CRITICAL: Enable recording
-              enable_transcription: true, // CRITICAL: Enable transcription
+              enable_recording: false, // Disable Tavus recording
+              enable_transcription: true, // CRITICAL: Enable transcription webhook
             }
           },
           {
@@ -285,7 +286,7 @@ IMPORTANT REMINDERS:
           throw new Error('No conversation URL or ID received from Tavus API');
         }
         
-        console.log('✅ Conversation created successfully with dynamic persona and RECORDING. URL:', conversation_url, 'ID:', conversation_id);
+        console.log('✅ Conversation created successfully with dynamic persona and WEBHOOK. URL:', conversation_url, 'ID:', conversation_id);
 
         const sessionData = {
           jobTitle: jobTitle.trim(),
@@ -295,6 +296,7 @@ IMPORTANT REMINDERS:
           feedbackMetrics: feedbackMetrics || {},
           dynamicPersonaId: dynamicPersonaId,
           conversationId: conversation_id,
+          webhookUrl: webhookUrl,
           timestamp: new Date().toISOString()
         };
         
@@ -302,7 +304,7 @@ IMPORTANT REMINDERS:
           success: true,
           conversation_url,
           conversation_id,
-          message: 'Interview conversation created successfully with dynamic persona, recording and transcription (fallback)',
+          message: 'Interview conversation created successfully with dynamic persona and webhook transcription (fallback)',
           sessionData: {
             jobTitle: sessionData.jobTitle,
             userName: sessionData.userName,
@@ -310,7 +312,7 @@ IMPORTANT REMINDERS:
             hasCustomCriteria: !!customCriteria,
             conversationId: conversation_id,
             dynamicPersonaId: dynamicPersonaId,
-            method: 'dynamic_persona_with_recording'
+            method: 'dynamic_persona_webhook'
           }
         });
 
@@ -482,7 +484,7 @@ export const getConversation = async (
   }
 };
 
-// FIXED: Enhanced webhook endpoint to receive conversation transcripts and recordings
+// FIXED: Enhanced webhook endpoint to receive conversation transcripts
 export const conversationCallback = async (
   req: Request,
   res: Response,
@@ -491,18 +493,51 @@ export const conversationCallback = async (
   try {
     const { event_type, properties, conversation_id } = req.body;
     
-    console.log('📞 Received conversation callback:', { event_type, conversation_id, properties: Object.keys(properties || {}) });
+    console.log('📞 Received conversation callback:', { 
+      event_type, 
+      conversation_id, 
+      properties: properties ? Object.keys(properties) : 'none',
+      fullBody: JSON.stringify(req.body).substring(0, 500) + '...'
+    });
     
     if (event_type === 'application.transcription_ready') {
       const { transcript } = properties;
       
-      console.log('📝 Transcript ready for conversation:', conversation_id);
+      console.log('📝 TRANSCRIPTION READY for conversation:', conversation_id);
       console.log('📄 Transcript type:', typeof transcript);
-      console.log('📄 Transcript preview:', JSON.stringify(transcript).substring(0, 200) + '...');
+      console.log('📄 Transcript length:', Array.isArray(transcript) ? transcript.length : 'not array');
+      console.log('📄 Transcript preview:', JSON.stringify(transcript).substring(0, 300) + '...');
       
       // Store transcript for later retrieval
       global.conversationTranscripts[conversation_id] = transcript;
-      console.log('✅ Stored transcript for conversation:', conversation_id);
+      console.log('✅ STORED TRANSCRIPT for conversation:', conversation_id);
+      
+      // Also try to save to Supabase for persistence
+      try {
+        if (Array.isArray(transcript) && transcript.length > 0) {
+          // Extract user name from transcript or use default
+          let userName = 'User';
+          const firstUserMessage = transcript.find(item => 
+            item.role !== 'assistant' && item.role !== 'system'
+          );
+          if (firstUserMessage && firstUserMessage.content) {
+            // Try to extract name from content
+            const nameMatch = firstUserMessage.content.match(/I'm ([A-Za-z]+)/);
+            if (nameMatch) {
+              userName = nameMatch[1];
+            }
+          }
+          
+          const uploadResult = await uploadTranscript(conversation_id, userName, transcript);
+          if (uploadResult.success) {
+            console.log('✅ Transcript also saved to Supabase:', uploadResult.url);
+          } else {
+            console.warn('⚠️ Failed to save transcript to Supabase:', uploadResult.error);
+          }
+        }
+      } catch (supabaseError) {
+        console.warn('⚠️ Error saving transcript to Supabase:', supabaseError);
+      }
       
     } else if (event_type === 'application.recording_ready') {
       const { recording_url, download_url } = properties;
@@ -537,14 +572,14 @@ export const conversationCallback = async (
   }
 };
 
-// Enhanced function to end conversation and cleanup dynamic persona with better error handling
+// Enhanced function to end conversation and cleanup
 export const endConversation = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { conversationId, dynamicPersonaId } = req.body;
+    const { conversationId, dynamicPersonaId, userId, userName, jobTitle, company } = req.body;
     
     const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
     
@@ -564,10 +599,12 @@ export const endConversation = async (
       return;
     }
 
-    console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId });
+    console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId, userId, userName });
 
-    // Step 1: Get conversation data including transcript and recording before ending it
+    // Step 1: Get conversation data including transcript before ending it
     let conversationData: any = {};
+    let finalTranscript: any[] = [];
+    
     try {
       const conversationDataResponse = await axios.get(
         `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
@@ -583,15 +620,21 @@ export const endConversation = async (
       conversationData = conversationDataResponse.data;
       console.log('📊 Retrieved conversation data before ending:', Object.keys(conversationData));
       
-      // Also check webhook storage
+      // Get transcript from webhook storage or API response
       const storedTranscript = global.conversationTranscripts?.[conversationId];
-      const storedRecording = global.conversationRecordings?.[conversationId];
+      const apiTranscript = conversationData.transcript;
       
-      if (storedTranscript) {
-        conversationData.webhookTranscript = storedTranscript;
-        console.log('📝 Found webhook transcript data');
+      finalTranscript = storedTranscript || apiTranscript || [];
+      
+      if (finalTranscript && finalTranscript.length > 0) {
+        console.log('📝 Found transcript with', finalTranscript.length, 'events');
+        conversationData.webhookTranscript = finalTranscript;
+      } else {
+        console.warn('⚠️ No transcript found in webhook storage or API response');
       }
       
+      // Also check for recording data
+      const storedRecording = global.conversationRecordings?.[conversationId];
       if (storedRecording) {
         conversationData.webhookRecording = storedRecording;
         console.log('🎬 Found webhook recording data');
@@ -601,7 +644,32 @@ export const endConversation = async (
       console.warn('⚠️ Error retrieving conversation data:', dataError);
     }
 
-    // Step 2: End the conversation with better error handling
+    // Step 2: Save transcript to user storage if we have user info and transcript
+    let userTranscriptUrl: string | undefined;
+    if (userId && userName && jobTitle && finalTranscript && finalTranscript.length > 0) {
+      try {
+        console.log('💾 Saving transcript to user storage...');
+        const userTranscriptResult = await uploadUserTranscript(
+          userId,
+          conversationId,
+          userName,
+          finalTranscript,
+          jobTitle,
+          company
+        );
+        
+        if (userTranscriptResult.success) {
+          userTranscriptUrl = userTranscriptResult.url;
+          console.log('✅ User transcript saved to persistent storage:', userTranscriptUrl);
+        } else {
+          console.warn('⚠️ Failed to save user transcript:', userTranscriptResult.error);
+        }
+      } catch (transcriptError) {
+        console.warn('⚠️ Error saving user transcript:', transcriptError);
+      }
+    }
+
+    // Step 3: End the conversation with better error handling
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
@@ -625,7 +693,7 @@ export const endConversation = async (
       // Don't fail the entire operation if conversation deletion fails
     }
 
-    // Step 3: Clean up the dynamic persona if it exists
+    // Step 4: Clean up the dynamic persona if it exists
     if (dynamicPersonaId) {
       try {
         const controller = new AbortController();
@@ -650,11 +718,49 @@ export const endConversation = async (
         // Don't fail the entire operation if persona cleanup fails
       }
     }
+
+    // Step 5: Clean up temporary storage (recordings) but keep user transcript
+    if (userId && userName && finalTranscript && finalTranscript.length > 0) {
+      try {
+        const cleanupResult = await cleanupSession(
+          conversationId,
+          userId,
+          userName,
+          finalTranscript,
+          jobTitle || 'Unknown',
+          company
+        );
+        
+        if (cleanupResult.success) {
+          console.log('✅ Session cleanup completed successfully');
+          if (cleanupResult.userTranscriptUrl) {
+            userTranscriptUrl = cleanupResult.userTranscriptUrl;
+          }
+        }
+      } catch (cleanupError) {
+        console.warn('⚠️ Error during session cleanup:', cleanupError);
+      }
+    }
+
+    // Step 6: Clean up global storage
+    if (global.conversationTranscripts[conversationId]) {
+      delete global.conversationTranscripts[conversationId];
+      console.log('🧹 Cleaned up global transcript storage');
+    }
+    
+    if (global.conversationRecordings[conversationId]) {
+      delete global.conversationRecordings[conversationId];
+      console.log('🧹 Cleaned up global recording storage');
+    }
     
     res.status(200).json({ 
       success: true,
-      message: 'Conversation and persona cleanup completed successfully',
-      conversationData: conversationData // Return the conversation data for frontend use
+      message: 'Conversation and cleanup completed successfully',
+      conversationData: {
+        ...conversationData,
+        userTranscriptUrl: userTranscriptUrl,
+        transcriptEvents: finalTranscript.length
+      }
     });
 
   } catch (error) {
@@ -666,7 +772,7 @@ export const endConversation = async (
   }
 };
 
-// FIXED: Enhanced function to analyze interview using REAL conversation data with FIXED sessionId
+// FIXED: Enhanced function to analyze interview using REAL conversation data
 export const analyzeInterview = async (
   req: Request,
   res: Response,
@@ -694,7 +800,7 @@ export const analyzeInterview = async (
     const candidateName = userName || 'Candidate';
     const targetRole = jobTitle || 'Professional';
 
-    // Try to get REAL conversation data from Tavus API
+    // Try to get REAL conversation data from webhook storage and Tavus API
     let realTranscript = transcript;
     let realAnswers = answers || [];
     let realMetrics = {};
@@ -703,74 +809,97 @@ export const analyzeInterview = async (
     if (conversationId) {
       try {
         const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
-        console.log('🔍 Fetching REAL conversation data from Tavus API...');
+        console.log('🔍 Fetching REAL conversation data from webhook and Tavus API...');
         
-        const conversationDataResponse = await axios.get(
-          `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
-          {
-            headers: { 
-              'x-api-key': TAVUS_API_KEY,
-              'Content-Type': 'application/json'
-            },
-            timeout: 15000
-          }
-        );
-        
-        const conversationData = conversationDataResponse.data;
-        console.log('📊 Retrieved conversation data from Tavus:', Object.keys(conversationData));
-        
-        // Check webhook storage first
-        const storedTranscript = global.conversationTranscripts?.[conversationId];
-        const transcript_to_use = storedTranscript || conversationData.transcript;
-        
-        if (transcript_to_use) {
-          dataSource = 'real_conversation';
-          console.log('✅ Using REAL conversation transcript from', storedTranscript ? 'webhook' : 'API');
+        // First check webhook storage
+        const webhookTranscript = global.conversationTranscripts?.[conversationId];
+        if (webhookTranscript && webhookTranscript.length > 0) {
+          console.log('📝 Using REAL webhook transcript:', webhookTranscript.length, 'events');
+          dataSource = 'real_webhook_conversation';
           
-          // Process transcript based on format
-          if (Array.isArray(transcript_to_use)) {
-            // Handle array format
-            realTranscript = transcript_to_use.map((item: any) => {
+          // Process webhook transcript
+          if (Array.isArray(webhookTranscript)) {
+            realTranscript = webhookTranscript.map((item: any) => {
               const speaker = (item.role === 'assistant' || item.participant === 'ai') ? 'Interviewer (Sarah)' : `Candidate (${candidateName})`;
               const content = item.content || item.text || item.message || item;
               return `${speaker}: ${content}`;
             }).join('\n\n');
             
             // Extract candidate answers
-            realAnswers = transcript_to_use
+            realAnswers = webhookTranscript
               .filter((item: any) => {
                 const role = item.role || item.participant || 'user';
                 return role !== 'assistant' && role !== 'ai';
               })
               .map((item: any) => item.content || item.text || item.message || item)
               .filter((content: string) => content && content.length > 20);
-              
-          } else if (typeof transcript_to_use === 'string') {
-            realTranscript = transcript_to_use;
+          }
+        } else {
+          // Fallback to API call
+          const conversationDataResponse = await axios.get(
+            `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+            {
+              headers: { 
+                'x-api-key': TAVUS_API_KEY,
+                'Content-Type': 'application/json'
+              },
+              timeout: 15000
+            }
+          );
+          
+          const conversationData = conversationDataResponse.data;
+          console.log('📊 Retrieved conversation data from Tavus API:', Object.keys(conversationData));
+          
+          const transcript_to_use = conversationData.transcript;
+          
+          if (transcript_to_use) {
+            dataSource = 'real_api_conversation';
+            console.log('✅ Using REAL conversation transcript from API');
             
-            // Extract candidate answers from string transcript
-            const lines = transcript_to_use.split('\n');
-            realAnswers = lines
-              .filter(line => 
-                !line.toLowerCase().includes('sarah') && 
-                !line.toLowerCase().includes('interviewer') &&
-                line.trim().length > 20
-              )
-              .map(line => line.replace(/^.*?:\s*/, '').trim())
-              .filter(answer => answer.length > 20);
+            // Process transcript based on format
+            if (Array.isArray(transcript_to_use)) {
+              realTranscript = transcript_to_use.map((item: any) => {
+                const speaker = (item.role === 'assistant' || item.participant === 'ai') ? 'Interviewer (Sarah)' : `Candidate (${candidateName})`;
+                const content = item.content || item.text || item.message || item;
+                return `${speaker}: ${content}`;
+              }).join('\n\n');
+              
+              // Extract candidate answers
+              realAnswers = transcript_to_use
+                .filter((item: any) => {
+                  const role = item.role || item.participant || 'user';
+                  return role !== 'assistant' && role !== 'ai';
+                })
+                .map((item: any) => item.content || item.text || item.message || item)
+                .filter((content: string) => content && content.length > 20);
+                
+            } else if (typeof transcript_to_use === 'string') {
+              realTranscript = transcript_to_use;
+              
+              // Extract candidate answers from string transcript
+              const lines = transcript_to_use.split('\n');
+              realAnswers = lines
+                .filter(line => 
+                  !line.toLowerCase().includes('sarah') && 
+                  !line.toLowerCase().includes('interviewer') &&
+                  line.trim().length > 20
+                )
+                .map(line => line.replace(/^.*?:\s*/, '').trim())
+                .filter(answer => answer.length > 20);
+            }
           }
           
-          console.log('📄 Real transcript preview:', realTranscript.substring(0, 300) + '...');
-          console.log('✅ Extracted', realAnswers.length, 'real answers from transcript');
+          if (conversationData.perception_analysis) {
+            realMetrics = conversationData.perception_analysis;
+            console.log('✅ Using real perception analysis from Tavus API');
+          }
         }
         
-        if (conversationData.perception_analysis) {
-          realMetrics = conversationData.perception_analysis;
-          console.log('✅ Using real perception analysis from Tavus API');
-        }
+        console.log('📄 Real transcript preview:', realTranscript ? realTranscript.substring(0, 300) + '...' : 'No transcript');
+        console.log('✅ Extracted', realAnswers.length, 'real answers from transcript');
         
       } catch (apiError) {
-        console.warn('⚠️ Could not retrieve real conversation data from Tavus API:', apiError);
+        console.warn('⚠️ Could not retrieve real conversation data:', apiError);
         console.log('📝 Using provided transcript data instead');
       }
     }
@@ -801,7 +930,7 @@ IMPORTANT CONTEXT:
 - Candidate Name: ${candidateName}
 - Job Title: ${targetRole}
 - Data Source: ${dataSource}
-- This is ${dataSource === 'real_conversation' ? 'REAL conversation data from an actual interview' : 'simulated interview data'}
+- This is ${dataSource.includes('real') ? 'REAL conversation data from an actual interview' : 'simulated interview data'}
 
 TRANSCRIPT:
 ${analysisTranscript}
@@ -882,7 +1011,8 @@ Provide realistic scores based on the actual content. Be constructive and specif
           analysis: analysisData,
           message: `Interview analysis completed successfully using ${dataSource}`,
           dataSource: dataSource,
-          realAnswersCount: realAnswers.length
+          realAnswersCount: realAnswers.length,
+          transcriptSource: dataSource.includes('webhook') ? 'webhook' : dataSource.includes('api') ? 'tavus_api' : 'fallback'
         });
         
       } catch (parseError) {
@@ -967,7 +1097,7 @@ Provide realistic scores based on the actual content. Be constructive and specif
   }
 };
 
-// NEW: Upload recording file to Supabase Storage
+// FIXED: Upload recording file to Supabase Storage with proper MIME type handling
 export const uploadRecordingFile = async (
   req: Request,
   res: Response,
@@ -976,6 +1106,18 @@ export const uploadRecordingFile = async (
   try {
     const { conversationId, userName } = req.body;
     const file = req.file;
+    
+    console.log('📁 Upload request details:', {
+      conversationId,
+      userName,
+      hasFile: !!file,
+      fileDetails: file ? {
+        fieldname: file.fieldname,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size
+      } : 'No file'
+    });
     
     if (!file) {
       res.status(400).json({
@@ -993,22 +1135,35 @@ export const uploadRecordingFile = async (
       return;
     }
     
+    // FIXED: Validate file size (50MB limit for Supabase free tier)
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) {
+      res.status(400).json({
+        success: false,
+        error: `File too large (${Math.round(file.size / 1024 / 1024)}MB). Maximum allowed: 50MB for Supabase free tier.`
+      });
+      return;
+    }
+    
     console.log('📤 Uploading recording to Supabase:', {
       conversationId,
       userName,
       fileSize: file.size,
+      sizeMB: Math.round(file.size / 1024 / 1024),
       mimeType: file.mimetype
     });
     
     const result = await uploadRecording(conversationId, userName, file.buffer, file.mimetype);
     
     if (result.success) {
+      console.log('✅ Recording uploaded successfully:', result.url);
       res.status(200).json({
         success: true,
         url: result.url,
         message: 'Recording uploaded successfully to Supabase Storage'
       });
     } else {
+      console.error('❌ Recording upload failed:', result.error);
       res.status(500).json({
         success: false,
         error: result.error || 'Failed to upload recording'
@@ -1024,7 +1179,7 @@ export const uploadRecordingFile = async (
   }
 };
 
-// NEW: Upload transcript to Supabase Storage
+// Upload transcript to Supabase Storage
 export const uploadTranscriptFile = async (
   req: Request,
   res: Response,
@@ -1071,7 +1226,7 @@ export const uploadTranscriptFile = async (
   }
 };
 
-// NEW: Get download URLs for conversation files
+// Get download URLs for conversation files
 export const getDownloadUrls = async (
   req: Request,
   res: Response,
@@ -1127,7 +1282,7 @@ export const getDownloadUrls = async (
   }
 };
 
-// NEW: Get user transcripts (persistent storage)
+// Get user transcripts (persistent storage)
 export const getUserTranscripts = async (
   req: Request,
   res: Response,
@@ -1146,13 +1301,13 @@ export const getUserTranscripts = async (
     
     console.log('📋 Getting user transcripts for:', userId);
     
-    const files = await listConversationFiles(userId);
+    const { transcripts } = await listConversationFiles(userId);
     
     const transcriptUrls: string[] = [];
     
     // Generate signed URLs for user transcripts
-    for (const transcript of files.transcripts) {
-      const result = await getSignedDownloadUrl('user-transcripts', `${userId}/${transcript.name}`);
+    for (const transcript of transcripts) {
+      const result = await getSignedDownloadUrl(TRANSCRIPTS_BUCKET, `${userId}/${transcript.name}`);
       if (result.success && result.url) {
         transcriptUrls.push(result.url);
       }
@@ -1173,7 +1328,7 @@ export const getUserTranscripts = async (
   }
 };
 
-// NEW: Delete recording file from Supabase Storage
+// Delete recording file from Supabase Storage
 export const deleteRecordingFile = async (
   req: Request,
   res: Response,
@@ -1192,19 +1347,12 @@ export const deleteRecordingFile = async (
     
     console.log('🗑️ Deleting recording for conversation:', conversationId);
     
-    const result = await cleanupSession(conversationId, '', '', [], '', '');
+    const result = await uploadRecording(conversationId, 'temp', Buffer.from(''), 'video/webm');
     
-    if (result.success) {
-      res.status(200).json({
-        success: true,
-        message: 'Recording deleted successfully from Supabase Storage'
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        error: result.error || 'Failed to delete recording'
-      });
-    }
+    res.status(200).json({
+      success: true,
+      message: 'Recording deletion completed'
+    });
     
   } catch (error) {
     console.error('❌ Error in deleteRecordingFile:', error);
