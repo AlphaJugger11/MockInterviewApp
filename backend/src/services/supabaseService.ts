@@ -226,3 +226,95 @@ export const listConversationFiles = async (
     return { recordings: [], transcripts: [] };
   }
 };
+
+/**
+ * Delete recording files for a conversation
+ */
+export const deleteRecording = async (
+  conversationId: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    // List all files in the conversation folder
+    const { data: files, error: listError } = await supabase.storage
+      .from(RECORDINGS_BUCKET)
+      .list(conversationId);
+
+    if (listError) {
+      console.error('❌ Error listing recording files:', listError);
+      return { success: false, error: listError.message };
+    }
+
+    if (!files || files.length === 0) {
+      console.log('📁 No recording files found for conversation:', conversationId);
+      return { success: true };
+    }
+
+    // Delete all files in the conversation folder
+    const filePaths = files.map(file => `${conversationId}/${file.name}`);
+    
+    const { error: deleteError } = await supabase.storage
+      .from(RECORDINGS_BUCKET)
+      .remove(filePaths);
+
+    if (deleteError) {
+      console.error('❌ Error deleting recording files:', deleteError);
+      return { success: false, error: deleteError.message };
+    }
+
+    console.log('✅ Recording files deleted successfully for conversation:', conversationId);
+    return { success: true };
+
+  } catch (error) {
+    console.error('❌ Error in deleteRecording:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    };
+  }
+};
+
+/**
+ * Delete transcript files for a conversation
+ */
+export const deleteTranscript = async (
+  conversationId: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    // List all files in the conversation folder
+    const { data: files, error: listError } = await supabase.storage
+      .from(TRANSCRIPTS_BUCKET)
+      .list(conversationId);
+
+    if (listError) {
+      console.error('❌ Error listing transcript files:', listError);
+      return { success: false, error: listError.message };
+    }
+
+    if (!files || files.length === 0) {
+      console.log('📁 No transcript files found for conversation:', conversationId);
+      return { success: true };
+    }
+
+    // Delete all files in the conversation folder
+    const filePaths = files.map(file => `${conversationId}/${file.name}`);
+    
+    const { error: deleteError } = await supabase.storage
+      .from(TRANSCRIPTS_BUCKET)
+      .remove(filePaths);
+
+    if (deleteError) {
+      console.error('❌ Error deleting transcript files:', deleteError);
+      return { success: false, error: deleteError.message };
+    }
+
+    console.log('✅ Transcript files deleted successfully for conversation:', conversationId);
+    return { success: true };
+
+  } catch (error) {
+    console.error('❌ Error in deleteTranscript:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    };
+  }
+};

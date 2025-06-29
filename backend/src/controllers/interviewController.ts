@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { uploadRecording, uploadTranscript, getSignedDownloadUrl, listConversationFiles, RECORDINGS_BUCKET, TRANSCRIPTS_BUCKET } from '../services/supabaseService';
+import { uploadRecording, uploadTranscript, getSignedDownloadUrl, listConversationFiles, RECORDINGS_BUCKET, TRANSCRIPTS_BUCKET, deleteRecording, deleteTranscript } from '../services/supabaseService';
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
@@ -74,7 +74,7 @@ Generate a complete system prompt that establishes Sarah's identity, role, and r
   }
 };
 
-// Enhanced controller function for creating conversations with PROPER RECORDING
+// Enhanced controller function for creating conversations WITHOUT S3 RECORDING
 export const createConversation = async (
   req: Request,
   res: Response,
@@ -110,7 +110,7 @@ export const createConversation = async (
       return;
     }
 
-    console.log("✅ Creating conversation with RECORDING AND TRANSCRIPTION ENABLED for:", { jobTitle, userName });
+    console.log("✅ Creating conversation WITHOUT S3 recording for:", { jobTitle, userName });
 
     // Step 1: Generate enhanced instructions using Gemini
     console.log("Generating enhanced instructions using Gemini API...");
@@ -156,8 +156,8 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Create conversation with RECORDING AND TRANSCRIPTION ENABLED
-    console.log("Creating conversation with RECORDING AND TRANSCRIPTION ENABLED...");
+    // Step 4: Create conversation WITHOUT RECORDING (no S3 required)
+    console.log("Creating conversation WITHOUT S3 recording...");
     
     try {
       const conversationResponse = await axios.post(
@@ -170,9 +170,9 @@ IMPORTANT REMINDERS:
             max_call_duration: 1200, // 20 minutes max call duration
             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
             participant_left_timeout: 15, // Set timeout after participant leaves
-            enable_recording: true, // CRITICAL: Enable recording
-            enable_transcription: true, // CRITICAL: Enable transcription
-            // Note: Without S3, recording will be temporary but still captured
+            enable_recording: false, // DISABLED: No S3 recording
+            enable_transcription: true, // ENABLED: Transcription only
+            // Note: Client-side recording will handle video capture
           }
         },
         {
@@ -190,7 +190,7 @@ IMPORTANT REMINDERS:
         throw new Error('No conversation URL or ID received from Tavus API');
       }
       
-      console.log('✅ Conversation created successfully with RECORDING. URL:', conversation_url, 'ID:', conversation_id);
+      console.log('✅ Conversation created successfully WITHOUT S3 recording. URL:', conversation_url, 'ID:', conversation_id);
 
       // Step 5: Store session data for later analysis
       const sessionData = {
@@ -201,7 +201,8 @@ IMPORTANT REMINDERS:
         feedbackMetrics: feedbackMetrics || {},
         conversationId: conversation_id,
         conversationalContext: conversationalContext,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        recordingMethod: 'client_side_only'
       };
       
       console.log("Session data prepared:", {
@@ -211,21 +212,22 @@ IMPORTANT REMINDERS:
         customCriteria: sessionData.customCriteria,
         feedbackMetrics: sessionData.feedbackMetrics,
         conversationalContext: sessionData.conversationalContext.substring(0, 100) + "...",
-        timestamp: sessionData.timestamp
+        timestamp: sessionData.timestamp,
+        recordingMethod: sessionData.recordingMethod
       });
       
       res.status(200).json({ 
         success: true,
         conversation_url,
         conversation_id,
-        message: 'Interview conversation created successfully with Tavus recording and transcription',
+        message: 'Interview conversation created successfully with client-side recording only',
         sessionData: {
           jobTitle: sessionData.jobTitle,
           userName: sessionData.userName,
           hasCustomInstructions: !!customInstructions,
           hasCustomCriteria: !!customCriteria,
           conversationId: conversation_id,
-          method: 'conversational_context_with_recording'
+          method: 'client_side_recording_only'
         }
       });
 
@@ -255,7 +257,7 @@ IMPORTANT REMINDERS:
         const dynamicPersonaId = personaResponse.data.persona_id;
         console.log("✅ Dynamic persona created as fallback:", dynamicPersonaId);
 
-        // Create conversation with the dynamic persona and RECORDING
+        // Create conversation with the dynamic persona WITHOUT RECORDING
         const conversationResponse = await axios.post(
           'https://tavusapi.com/v2/conversations',
           {
@@ -266,8 +268,8 @@ IMPORTANT REMINDERS:
               max_call_duration: 1200,
               participant_absent_timeout: 300,
               participant_left_timeout: 15,
-              enable_recording: true, // CRITICAL: Enable recording
-              enable_transcription: true, // CRITICAL: Enable transcription
+              enable_recording: false, // DISABLED: No S3 recording
+              enable_transcription: true, // ENABLED: Transcription only
             }
           },
           {
@@ -285,7 +287,7 @@ IMPORTANT REMINDERS:
           throw new Error('No conversation URL or ID received from Tavus API');
         }
         
-        console.log('✅ Conversation created successfully with dynamic persona and RECORDING. URL:', conversation_url, 'ID:', conversation_id);
+        console.log('✅ Conversation created successfully with dynamic persona WITHOUT S3 recording. URL:', conversation_url, 'ID:', conversation_id);
 
         const sessionData = {
           jobTitle: jobTitle.trim(),
@@ -295,14 +297,15 @@ IMPORTANT REMINDERS:
           feedbackMetrics: feedbackMetrics || {},
           dynamicPersonaId: dynamicPersonaId,
           conversationId: conversation_id,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          recordingMethod: 'client_side_only'
         };
         
         res.status(200).json({ 
           success: true,
           conversation_url,
           conversation_id,
-          message: 'Interview conversation created successfully with dynamic persona, recording and transcription (fallback)',
+          message: 'Interview conversation created successfully with dynamic persona and client-side recording only',
           sessionData: {
             jobTitle: sessionData.jobTitle,
             userName: sessionData.userName,
@@ -310,7 +313,7 @@ IMPORTANT REMINDERS:
             hasCustomCriteria: !!customCriteria,
             conversationId: conversation_id,
             dynamicPersonaId: dynamicPersonaId,
-            method: 'dynamic_persona_with_recording'
+            method: 'client_side_recording_only'
           }
         });
 
@@ -388,10 +391,8 @@ export const getConversation = async (
       
       // Check for stored transcript from webhook first
       const storedTranscript = global.conversationTranscripts?.[conversationId];
-      const storedRecording = global.conversationRecordings?.[conversationId];
       
       console.log('📝 Stored transcript available:', !!storedTranscript);
-      console.log('🎬 Stored recording available:', !!storedRecording);
       
       // Extract and format transcript if available
       let formattedTranscript = '';
@@ -403,7 +404,7 @@ export const getConversation = async (
       if (transcript) {
         console.log('📝 Processing transcript:', typeof transcript);
         
-        if (Array.isArray(transcript)) {
+        if (Array.isArray(transcript) && transcript.length > 0) {
           // Handle array format from webhook or verbose API
           transcriptEvents = transcript.map((item, index) => {
             let content = '';
@@ -456,12 +457,13 @@ export const getConversation = async (
         conversation_id: conversationId,
         transcript: formattedTranscript,
         transcriptEvents: transcriptEvents,
-        recording_url: storedRecording?.recording_url || conversationData.recording_url || null,
-        download_url: storedRecording?.download_url || conversationData.download_url || null,
+        recording_url: null, // No S3 recording
+        download_url: null, // No S3 recording
         status: conversationData.status || 'unknown',
         duration: conversationData.duration || null,
         perception_analysis: conversationData.perception_analysis || null,
-        hasWebhookData: !!(storedTranscript || storedRecording),
+        hasWebhookData: !!storedTranscript,
+        recordingMethod: 'client_side_only',
         ...conversationData
       });
       
@@ -482,7 +484,7 @@ export const getConversation = async (
   }
 };
 
-// FIXED: Enhanced webhook endpoint to receive conversation transcripts and recordings
+// FIXED: Enhanced webhook endpoint to receive conversation transcripts
 export const conversationCallback = async (
   req: Request,
   res: Response,
@@ -503,21 +505,6 @@ export const conversationCallback = async (
       // Store transcript for later retrieval
       global.conversationTranscripts[conversation_id] = transcript;
       console.log('✅ Stored transcript for conversation:', conversation_id);
-      
-    } else if (event_type === 'application.recording_ready') {
-      const { recording_url, download_url } = properties;
-      
-      console.log('🎬 Recording ready for conversation:', conversation_id);
-      console.log('📹 Recording URL:', recording_url);
-      console.log('⬇️ Download URL:', download_url);
-      
-      // Store recording URLs for later access
-      global.conversationRecordings[conversation_id] = {
-        recording_url,
-        download_url,
-        timestamp: new Date().toISOString()
-      };
-      console.log('✅ Stored recording for conversation:', conversation_id);
       
     } else if (event_type === 'system.shutdown') {
       console.log('🛑 Conversation ended:', conversation_id, 'Reason:', properties?.shutdown_reason);
@@ -566,7 +553,7 @@ export const endConversation = async (
 
     console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId });
 
-    // Step 1: Get conversation data including transcript and recording before ending it
+    // Step 1: Get conversation data including transcript before ending it
     let conversationData: any = {};
     try {
       const conversationDataResponse = await axios.get(
@@ -585,16 +572,10 @@ export const endConversation = async (
       
       // Also check webhook storage
       const storedTranscript = global.conversationTranscripts?.[conversationId];
-      const storedRecording = global.conversationRecordings?.[conversationId];
       
       if (storedTranscript) {
         conversationData.webhookTranscript = storedTranscript;
         console.log('📝 Found webhook transcript data');
-      }
-      
-      if (storedRecording) {
-        conversationData.webhookRecording = storedRecording;
-        console.log('🎬 Found webhook recording data');
       }
       
     } catch (dataError) {
@@ -650,10 +631,22 @@ export const endConversation = async (
         // Don't fail the entire operation if persona cleanup fails
       }
     }
+
+    // Step 4: Schedule deletion of Supabase files after session ends
+    setTimeout(async () => {
+      try {
+        console.log('🗑️ Cleaning up Supabase files for conversation:', conversationId);
+        await deleteRecording(conversationId);
+        await deleteTranscript(conversationId);
+        console.log('✅ Supabase files cleaned up successfully');
+      } catch (cleanupError) {
+        console.warn('⚠️ Error cleaning up Supabase files:', cleanupError);
+      }
+    }, 60000); // Delete after 1 minute to allow download
     
     res.status(200).json({ 
       success: true,
-      message: 'Conversation and persona cleanup completed successfully',
+      message: 'Conversation and persona cleanup completed successfully. Supabase files will be deleted in 1 minute.',
       conversationData: conversationData // Return the conversation data for frontend use
     });
 
@@ -1120,6 +1113,48 @@ export const getDownloadUrls = async (
     
   } catch (error) {
     console.error('❌ Error in getDownloadUrls:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// NEW: Delete recording from Supabase
+export const deleteRecordingFile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { conversationId } = req.params;
+    
+    if (!conversationId) {
+      res.status(400).json({
+        success: false,
+        error: 'Conversation ID is required'
+      });
+      return;
+    }
+    
+    console.log('🗑️ Deleting recording for conversation:', conversationId);
+    
+    const result = await deleteRecording(conversationId);
+    
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: 'Recording deleted successfully from Supabase Storage'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error || 'Failed to delete recording'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in deleteRecordingFile:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Internal server error'

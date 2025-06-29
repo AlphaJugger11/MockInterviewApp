@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback, getConversation, uploadRecordingFile, uploadTranscriptFile, getDownloadUrls } from '../controllers/interviewController';
+import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback, getConversation, uploadRecordingFile, uploadTranscriptFile, getDownloadUrls, deleteRecordingFile } from '../controllers/interviewController';
 import { validateInterviewRequest, validateConversationRequest } from '../middleware/validation';
 
 const router = express.Router();
@@ -20,7 +20,7 @@ const upload = multer({
   }
 });
 
-// POST /api/interview/create-conversation - Enhanced dynamic persona endpoint
+// POST /api/interview/create-conversation - Enhanced dynamic persona endpoint WITHOUT S3 recording
 router.post('/create-conversation', validateConversationRequest, createConversation);
 
 // GET /api/interview/get-conversation/:conversationId - Get conversation data
@@ -32,7 +32,7 @@ router.post('/end-conversation', endConversation);
 // POST /api/interview/analyze - Endpoint for AI-powered analysis with real data
 router.post('/analyze', analyzeInterview);
 
-// POST /api/interview/conversation-callback - Webhook for conversation transcripts and recordings
+// POST /api/interview/conversation-callback - Webhook for conversation transcripts
 router.post('/conversation-callback', conversationCallback);
 
 // POST /api/interview/upload-recording - Upload recording to Supabase
@@ -43,6 +43,9 @@ router.post('/upload-transcript', uploadTranscriptFile);
 
 // GET /api/interview/download-urls/:conversationId - Get download URLs for files
 router.get('/download-urls/:conversationId', getDownloadUrls);
+
+// DELETE /api/interview/delete-recording/:conversationId - Delete recording from Supabase
+router.delete('/delete-recording/:conversationId', deleteRecordingFile);
 
 // POST /api/interview/start - Legacy endpoint
 router.post('/start', validateInterviewRequest, startInterview);

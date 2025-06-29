@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Square, Download, AlertCircle, Upload, Cloud } from 'lucide-react';
-import { uploadRecordingToSupabase, uploadTranscriptToSupabase } from '../services/supabaseClient';
+import { Square, AlertCircle } from 'lucide-react';
+import FullSessionRecorder from '../components/FullSessionRecorder';
 
 const Interview = () => {
   const navigate = useNavigate();
@@ -13,25 +13,13 @@ const Interview = () => {
   const [sessionDuration, setSessionDuration] = useState(0);
   const [userName, setUserName] = useState<string>('');
   const [isEnding, setIsEnding] = useState(false);
-
-  // Enhanced recording states with Supabase integration
-  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
-  const [localRecordingUrl, setLocalRecordingUrl] = useState<string | null>(null);
   const [capturedTranscript, setCapturedTranscript] = useState<any[]>([]);
-  const [recordingActive, setRecordingActive] = useState(false);
-  const [sessionEnded, setSessionEnded] = useState(false);
-  const [recordingValidated, setRecordingValidated] = useState(false);
-  const [supabaseUploadStatus, setSupabaseUploadStatus] = useState<{
-    recording: 'idle' | 'uploading' | 'success' | 'error';
-    transcript: 'idle' | 'uploading' | 'success' | 'error';
-  }>({ recording: 'idle', transcript: 'idle' });
+  const [recordingData, setRecordingData] = useState<any>(null);
 
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const endingInProgressRef = useRef<boolean>(false);
-  const transcriptIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     // Get the conversation data from localStorage
@@ -57,350 +45,66 @@ const Interview = () => {
 
     // Session duration timer
     const timer = setInterval(() => {
-      if (!isEnding && !sessionEnded) {
+      if (!isEnding) {
         setSessionDuration(Math.floor((Date.now() - sessionStartTimeRef.current) / 1000));
       }
     }, 1000);
 
-    // Cleanup function
-    return () => {
-      clearInterval(timer);
-      if (transcriptIntervalRef.current) {
-        clearInterval(transcriptIntervalRef.current);
-      }
-    };
-  }, [navigate, isEnding, sessionEnded]);
+    return () => clearInterval(timer);
+  }, [navigate, isEnding]);
 
-  // ENHANCED: Local recording with Supabase upload capability
-  useEffect(() => {
-    const startLocalRecording = async () => {
-      if (!conversationId || recordingActive || isEnding || sessionEnded) {
-        return;
-      }
+  // Handle recording completion
+  const handleRecordingComplete = (data: any) => {
+    setRecordingData(data);
+    console.log('✅ Recording completed:', data);
+  };
 
-      try {
-        console.log('🎬 Starting local screen recording with Supabase integration...');
-        
-        // Request screen capture with audio
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { 
-            mediaSource: 'screen',
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            frameRate: { ideal: 30 }
-          },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            sampleRate: 44100
-          }
-        });
-        
-        console.log('✅ Screen capture permission granted');
-        
-        // Use VP8 codec for better compatibility
-        let mimeType = 'video/webm;codecs=vp8,opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = 'video/webm;codecs=vp9,opus';
-          if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm';
-          }
-        }
-        
-        console.log('🎥 Using MIME type:', mimeType);
-        
-        // Create MediaRecorder with compatible codec
-        const recorder = new MediaRecorder(stream, {
-          mimeType: mimeType,
-          videoBitsPerSecond: 1000000, // 1MB/s for good quality
-          audioBitsPerSecond: 64000    // 64KB/s for audio
-        });
-        
-        const chunks: Blob[] = [];
-        
-        recorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            chunks.push(event.data);
-            console.log('📊 Recording chunk received:', event.data.size, 'bytes');
-          }
-        };
-        
-        recorder.onstop = async () => {
-          console.log('🛑 Local recording stopped, creating blob and uploading to Supabase...');
-          const blob = new Blob(chunks, { type: mimeType });
-          
-          // Validate blob before processing
-          if (blob.size > 1000) { // Ensure minimum file size
-            const url = URL.createObjectURL(blob);
-            
-            console.log('✅ Valid recording blob created:', blob.size, 'bytes');
-            
-            // Store for immediate download
-            setLocalRecordingUrl(url);
-            setRecordedChunks(chunks);
-            setRecordingValidated(true);
-            
-            // Store in localStorage for backup
-            localStorage.setItem(`local_recording_${conversationId}`, url);
-            localStorage.setItem(`local_recording_${conversationId}_metadata`, JSON.stringify({
-              format: 'webm',
-              codec: mimeType,
-              source: 'local_screen_capture',
-              url: url,
-              timestamp: new Date().toISOString(),
-              size: blob.size,
-              duration: sessionDuration,
-              quality: 'high',
-              validated: true
-            }));
-            
-            // Upload to Supabase Storage
-            console.log('☁️ Uploading recording to Supabase Storage...');
-            setSupabaseUploadStatus(prev => ({ ...prev, recording: 'uploading' }));
-            
-            try {
-              const uploadResult = await uploadRecordingToSupabase(conversationId, userName, blob);
-              
-              if (uploadResult.success) {
-                console.log('✅ Recording uploaded to Supabase successfully:', uploadResult.url);
-                setSupabaseUploadStatus(prev => ({ ...prev, recording: 'success' }));
-                
-                // Store Supabase URL for later access
-                localStorage.setItem(`supabase_recording_${conversationId}`, uploadResult.url!);
-              } else {
-                console.error('❌ Failed to upload recording to Supabase:', uploadResult.error);
-                setSupabaseUploadStatus(prev => ({ ...prev, recording: 'error' }));
-              }
-            } catch (uploadError) {
-              console.error('❌ Error uploading recording to Supabase:', uploadError);
-              setSupabaseUploadStatus(prev => ({ ...prev, recording: 'error' }));
-            }
-            
-            console.log('💾 Recording processed and ready for download');
-          } else {
-            console.error('❌ Recording too small, likely corrupted:', blob.size, 'bytes');
-            setRecordingValidated(false);
-          }
-        };
-        
-        recorder.onerror = (event) => {
-          console.error('❌ Recording error:', event);
-          setRecordingActive(false);
-          setRecordingValidated(false);
-        };
-        
-        // Start recording with smaller intervals for stability
-        recorder.start(500); // Collect data every 500ms
-        setMediaRecorder(recorder);
-        setRecordingActive(true);
-        
-        console.log('✅ Local screen recording started successfully with codec:', mimeType);
-        
-        // Handle stream end
-        stream.getVideoTracks()[0].addEventListener('ended', () => {
-          console.log('📺 Screen sharing ended by user');
-          if (recorder.state === 'recording') {
-            recorder.stop();
-          }
-          setRecordingActive(false);
-        });
-        
-      } catch (error) {
-        console.warn('⚠️ Screen recording not available:', error);
-        setRecordingActive(false);
-        setRecordingValidated(false);
-        
-        if (error instanceof Error && error.name === 'NotAllowedError') {
-          console.log('📺 User denied screen sharing permission - continuing with Tavus recording only');
-        }
-      }
-    };
-    
-    // Start local recording after a short delay
-    if (conversationId && isRecording && !recordingActive && !isEnding && !sessionEnded) {
-      const timeout = setTimeout(() => {
-        startLocalRecording();
-      }, 3000); // 3 second delay to ensure page is loaded
-      
-      return () => clearTimeout(timeout);
-    }
-  }, [conversationId, isRecording, recordingActive, sessionDuration, isEnding, sessionEnded, userName]);
+  // Handle transcript updates
+  const handleTranscriptUpdate = (transcript: any[]) => {
+    setCapturedTranscript(transcript);
+    console.log('📝 Transcript updated:', transcript.length, 'events');
+  };
 
-  // Enhanced transcript capture with Supabase upload
-  useEffect(() => {
-    const captureTranscript = async () => {
-      if (!conversationId || isEnding || sessionEnded) return;
-
-      try {
-        const response = await fetch(`http://localhost:3001/api/interview/get-conversation/${conversationId}`, {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.transcriptEvents && data.transcriptEvents.length > 0) {
-            setCapturedTranscript(data.transcriptEvents);
-            
-            // Store transcript in localStorage immediately
-            localStorage.setItem(`live_transcript_${conversationId}`, JSON.stringify(data.transcriptEvents));
-            console.log('📝 Live transcript updated:', data.transcriptEvents.length, 'events');
-          }
-        }
-      } catch (error) {
-        console.warn('⚠️ Error capturing live transcript:', error);
-      }
-    };
-
-    // Start transcript capture interval every 3 seconds
-    if (conversationId && !transcriptIntervalRef.current && !isEnding && !sessionEnded) {
-      // Initial capture
-      captureTranscript();
-      
-      // Set up interval
-      transcriptIntervalRef.current = setInterval(captureTranscript, 3000); // Every 3 seconds
-      console.log('📝 Started live transcript capture every 3 seconds');
-    }
-
-    return () => {
-      if (transcriptIntervalRef.current) {
-        clearInterval(transcriptIntervalRef.current);
-        transcriptIntervalRef.current = null;
-      }
-    };
-  }, [conversationId, isEnding, sessionEnded]);
-
-  // Enhanced session cleanup with Supabase uploads
+  // Enhanced session cleanup
   const handleEndSession = async () => {
-    if (isEnding || endingInProgressRef.current || sessionEnded) return;
+    if (isEnding || endingInProgressRef.current) return;
     
-    console.log('🛑 CRITICAL: Ending interview session and uploading to Supabase...');
+    console.log('🛑 Ending interview session...');
     setIsEnding(true);
-    setSessionEnded(true);
     endingInProgressRef.current = true;
     
     try {
-      // Step 1: Stop local recording and prepare for upload
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        console.log('🛑 Stopping local recording...');
-        mediaRecorder.stop();
-        
-        // Wait for recording to process
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-
-      // Step 2: Capture final transcript
-      console.log('📝 Capturing final transcript...');
-      let finalTranscript: any[] = [];
-      
-      if (conversationId) {
-        try {
-          const response = await fetch(`http://localhost:3001/api/interview/get-conversation/${conversationId}`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-          });
-          
-          if (response.ok) {
-            const conversationData = await response.json();
-            if (conversationData.transcriptEvents && conversationData.transcriptEvents.length > 0) {
-              finalTranscript = conversationData.transcriptEvents;
-              console.log('✅ Retrieved final transcript:', finalTranscript.length, 'events');
-            }
-          }
-        } catch (apiError) {
-          console.warn('⚠️ Could not retrieve final transcript from API:', apiError);
-        }
-      }
-
-      // Use captured transcript as fallback
-      if (finalTranscript.length === 0 && capturedTranscript.length > 0) {
-        finalTranscript = capturedTranscript;
-        console.log('📝 Using captured transcript as fallback:', finalTranscript.length, 'events');
-      }
-
-      // Step 3: Upload transcript to Supabase
-      if (finalTranscript.length > 0) {
-        console.log('☁️ Uploading transcript to Supabase Storage...');
-        setSupabaseUploadStatus(prev => ({ ...prev, transcript: 'uploading' }));
-        
-        try {
-          const transcriptUploadResult = await uploadTranscriptToSupabase(conversationId!, userName, finalTranscript);
-          
-          if (transcriptUploadResult.success) {
-            console.log('✅ Transcript uploaded to Supabase successfully:', transcriptUploadResult.url);
-            setSupabaseUploadStatus(prev => ({ ...prev, transcript: 'success' }));
-            
-            // Store Supabase URL for later access
-            localStorage.setItem(`supabase_transcript_${conversationId}`, transcriptUploadResult.url!);
-          } else {
-            console.error('❌ Failed to upload transcript to Supabase:', transcriptUploadResult.error);
-            setSupabaseUploadStatus(prev => ({ ...prev, transcript: 'error' }));
-          }
-        } catch (uploadError) {
-          console.error('❌ Error uploading transcript to Supabase:', uploadError);
-          setSupabaseUploadStatus(prev => ({ ...prev, transcript: 'error' }));
-        }
-      }
-
-      // Step 4: Store final session data
+      // Store final session data
       const finalSessionData = {
         conversationId,
-        transcript: finalTranscript,
+        transcript: capturedTranscript,
         duration: sessionDuration,
         endTime: new Date().toISOString(),
         userName,
         jobTitle: localStorage.getItem('jobTitle'),
         company: localStorage.getItem('company'),
-        localRecordingUrl: localRecordingUrl,
-        hasLocalRecording: recordingValidated,
-        transcriptLength: finalTranscript.length,
-        recordingValidated: recordingValidated,
-        supabaseRecordingUrl: localStorage.getItem(`supabase_recording_${conversationId}`),
-        supabaseTranscriptUrl: localStorage.getItem(`supabase_transcript_${conversationId}`),
-        supabaseUploadStatus: supabaseUploadStatus
+        recordingData: recordingData,
+        transcriptLength: capturedTranscript.length
       };
       
       localStorage.setItem(`session_${conversationId}`, JSON.stringify(finalSessionData));
-      localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(finalTranscript));
+      localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(capturedTranscript));
+      localStorage.setItem('sessionCompleted', 'true');
+      localStorage.setItem('sessionEndTime', new Date().toISOString());
+      localStorage.setItem('sessionDuration', sessionDuration.toString());
       
-      console.log('💾 Final session data stored with Supabase URLs');
+      console.log('💾 Final session data stored');
 
-      // Step 5: Force download transcript immediately if available
-      if (finalTranscript.length > 0) {
-        downloadTranscriptFile(finalTranscript);
-      } else {
-        console.warn('⚠️ No transcript available for download');
-        alert('No transcript was captured during the session. Please check if the conversation was recorded properly.');
-      }
-
-      // Step 6: Force download recording if available and validated
-      if (localRecordingUrl && recordingValidated) {
-        downloadRecordingFile();
-      } else {
-        console.warn('⚠️ No valid local recording available for download');
-        alert('No valid local recording was captured. Check Supabase Storage for cloud backup.');
-      }
-
-      // Step 7: End conversation on backend (non-blocking)
+      // End conversation on backend (non-blocking)
       if (conversationId) {
         try {
-          console.log('🛑 Ending conversation on backend...');
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
-          
           fetch('http://localhost:3001/api/interview/end-conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               conversationId,
               dynamicPersonaId
-            }),
-            signal: controller.signal
-          }).then(response => {
-            clearTimeout(timeoutId);
-            if (response.ok) {
-              console.log('✅ Conversation ended successfully on backend');
-            }
+            })
           }).catch(error => {
             console.warn('⚠️ Error ending conversation on backend (non-blocking):', error);
           });
@@ -409,137 +113,19 @@ const Interview = () => {
         }
       }
       
-      // Step 8: Store completion data and navigate
-      localStorage.setItem('sessionCompleted', 'true');
-      localStorage.setItem('sessionEndTime', new Date().toISOString());
-      localStorage.setItem('sessionDuration', sessionDuration.toString());
-      
-      // Navigate after a short delay to ensure uploads complete
+      // Navigate to feedback page
       setTimeout(() => {
         console.log('✅ Navigating to feedback page...');
         navigate('/feedback/1');
-      }, 3000); // Increased delay for Supabase uploads
+      }, 2000);
       
     } catch (error) {
       console.error('❌ Error during session cleanup:', error);
       setError('Error ending session. Please try again.');
       setIsEnding(false);
-      setSessionEnded(false);
       endingInProgressRef.current = false;
     }
   };
-
-  // Force download transcript file
-  const downloadTranscriptFile = (transcript: any[]) => {
-    try {
-      if (transcript.length === 0) {
-        console.warn('⚠️ No transcript data to download');
-        return;
-      }
-      
-      // Format transcript for download
-      const formattedTranscript = transcript.map(event => {
-        const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
-        const timestamp = new Date(event.timestamp).toLocaleTimeString();
-        return `[${timestamp}] ${speaker}: ${event.content}`;
-      }).join('\n\n');
-      
-      // Add header
-      const header = `INTERVIEW TRANSCRIPT
-===================
-Candidate: ${userName}
-Job Title: ${localStorage.getItem('jobTitle') || 'Not specified'}
-Company: ${localStorage.getItem('company') || 'Not specified'}
-Date: ${new Date().toLocaleDateString()}
-Duration: ${Math.floor(sessionDuration / 60)}:${(sessionDuration % 60).toString().padStart(2, '0')}
-Conversation ID: ${conversationId}
-Events Count: ${transcript.length}
-Supabase Backup: ${supabaseUploadStatus.transcript === 'success' ? 'Available' : 'Not Available'}
-
-TRANSCRIPT:
-===========
-
-`;
-      
-      const fullTranscript = header + formattedTranscript;
-      
-      // Create and trigger download
-      const blob = new Blob([fullTranscript], { type: 'text/plain;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `interview-transcript-${userName}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
-      link.style.display = 'none';
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // Cleanup
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      
-      console.log('📄 Transcript download triggered successfully');
-    } catch (error) {
-      console.error('❌ Error downloading transcript:', error);
-    }
-  };
-
-  // Force download recording file
-  const downloadRecordingFile = () => {
-    try {
-      if (!localRecordingUrl) {
-        console.warn('⚠️ No local recording URL available');
-        return;
-      }
-      
-      // Create and trigger download
-      const link = document.createElement('a');
-      link.href = localRecordingUrl;
-      link.download = `interview-recording-${userName}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
-      link.style.display = 'none';
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      console.log('🎬 Recording download triggered successfully');
-    } catch (error) {
-      console.error('❌ Error downloading recording:', error);
-    }
-  };
-
-  // Handle unexpected tab close
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      // Stop recording if active
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-      }
-      
-      // Cleanup intervals
-      if (transcriptIntervalRef.current) {
-        clearInterval(transcriptIntervalRef.current);
-      }
-      
-      // Use sendBeacon for reliable cleanup
-      if (conversationId && !isEnding && !sessionEnded) {
-        const data = JSON.stringify({ 
-          conversationId,
-          dynamicPersonaId 
-        });
-        navigator.sendBeacon('http://localhost:3001/api/interview/end-conversation', data);
-      }
-      
-      event.preventDefault();
-      event.returnValue = '';
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [conversationId, dynamicPersonaId, isEnding, mediaRecorder, sessionEnded]);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -578,23 +164,21 @@ TRANSCRIPT:
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session - Recording Active
+                Live Interview Session - Client-Side Recording
               </span>
-              {isRecording && !isEnding && !sessionEnded && (
+              {isRecording && !isEnding && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                  Recording • {formatDuration(sessionDuration)} • 
-                  {recordingActive && recordingValidated ? ' Local + Supabase Storage' : 
-                   recordingActive ? ' Local Recording (Processing)' : ' Cloud Recording Only'}
+                  Duration: {formatDuration(sessionDuration)} • Transcript: {capturedTranscript.length} events
                 </span>
               )}
             </div>
             <button
               onClick={handleEndSession}
-              disabled={isEnding || sessionEnded}
+              disabled={isEnding}
               className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Square className="h-4 w-4 mr-2" />
-              {isEnding ? 'Ending & Uploading...' : 'End Session & Save to Cloud'}
+              {isEnding ? 'Ending Session...' : 'End Session & Save'}
             </button>
           </div>
         </div>
@@ -602,7 +186,7 @@ TRANSCRIPT:
       
       <div className="max-w-6xl mx-auto p-8">
         {/* Interview Area */}
-        <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
+        <div className="bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border mb-6">
           <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
             AI Interview with Sarah - {userName}
           </h3>
@@ -625,40 +209,12 @@ TRANSCRIPT:
                 <div className="flex justify-center space-x-4">
                   <div className="inline-flex items-center space-x-2 bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded-full text-sm">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span>Tavus Cloud Recording</span>
+                    <span>Tavus Cloud Interview</span>
                   </div>
-                  {recordingActive && (
-                    <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
-                      recordingValidated 
-                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' 
-                        : 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
-                    }`}>
-                      <div className={`w-2 h-2 rounded-full animate-pulse ${
-                        recordingValidated ? 'bg-blue-500' : 'bg-yellow-500'
-                      }`}></div>
-                      <span>{recordingValidated ? 'Local Recording Active' : 'Local Recording Processing'}</span>
-                    </div>
-                  )}
-                  {supabaseUploadStatus.recording !== 'idle' && (
-                    <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
-                      supabaseUploadStatus.recording === 'success' ? 'bg-green-500/10 text-green-600 dark:text-green-400' :
-                      supabaseUploadStatus.recording === 'uploading' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
-                      'bg-red-500/10 text-red-600 dark:text-red-400'
-                    }`}>
-                      <Cloud className="w-3 h-3" />
-                      <span>
-                        {supabaseUploadStatus.recording === 'success' ? 'Uploaded to Supabase' :
-                         supabaseUploadStatus.recording === 'uploading' ? 'Uploading...' :
-                         'Upload Failed'}
-                      </span>
-                    </div>
-                  )}
-                  {capturedTranscript.length > 0 && (
-                    <div className="inline-flex items-center space-x-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 px-3 py-1 rounded-full text-sm">
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                      <span>Transcript: {capturedTranscript.length} events</span>
-                    </div>
-                  )}
+                  <div className="inline-flex items-center space-x-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full text-sm">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                    <span>Client-Side Recording</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -672,6 +228,16 @@ TRANSCRIPT:
           )}
         </div>
 
+        {/* Client-Side Recording System */}
+        {conversationId && (
+          <FullSessionRecorder
+            conversationId={conversationId}
+            userName={userName}
+            onRecordingComplete={handleRecordingComplete}
+            onTranscriptUpdate={handleTranscriptUpdate}
+          />
+        )}
+
         {/* Session Info */}
         <div className="mt-6 bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
           <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
@@ -680,8 +246,8 @@ TRANSCRIPT:
           <div className="grid md:grid-cols-3 gap-4 text-sm">
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Status:</span>
-              <span className={`font-medium ${isEnding || sessionEnded ? 'text-orange-500' : 'text-green-500'}`}>
-                {isEnding || sessionEnded ? 'Ending Session...' : isRecording ? 'Live Interview' : 'Ready'}
+              <span className={`font-medium ${isEnding ? 'text-orange-500' : 'text-green-500'}`}>
+                {isEnding ? 'Ending Session...' : isRecording ? 'Live Interview' : 'Ready'}
               </span>
             </div>
             <div className="flex justify-between">
@@ -692,12 +258,8 @@ TRANSCRIPT:
             </div>
             <div className="flex justify-between">
               <span className="text-light-text-secondary dark:text-dark-text-secondary">Recording:</span>
-              <span className={`font-medium ${
-                recordingActive && recordingValidated ? 'text-green-500' : 
-                recordingActive ? 'text-yellow-500' : 'text-blue-500'
-              }`}>
-                {recordingActive && recordingValidated ? 'Local + Cloud' : 
-                 recordingActive ? 'Processing' : 'Cloud Only'}
+              <span className="text-blue-500 font-medium">
+                Client-Side + Supabase
               </span>
             </div>
             <div className="flex justify-between">
@@ -718,72 +280,6 @@ TRANSCRIPT:
                 {capturedTranscript.length} events
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-light-text-secondary dark:text-dark-text-secondary">Supabase Recording:</span>
-              <span className={`font-medium text-xs ${
-                supabaseUploadStatus.recording === 'success' ? 'text-green-500' : 
-                supabaseUploadStatus.recording === 'uploading' ? 'text-blue-500' :
-                supabaseUploadStatus.recording === 'error' ? 'text-red-500' : 'text-gray-500'
-              }`}>
-                {supabaseUploadStatus.recording === 'success' ? 'Uploaded' :
-                 supabaseUploadStatus.recording === 'uploading' ? 'Uploading' :
-                 supabaseUploadStatus.recording === 'error' ? 'Failed' : 'Pending'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-light-text-secondary dark:text-dark-text-secondary">Supabase Transcript:</span>
-              <span className={`font-medium text-xs ${
-                supabaseUploadStatus.transcript === 'success' ? 'text-green-500' : 
-                supabaseUploadStatus.transcript === 'uploading' ? 'text-blue-500' :
-                supabaseUploadStatus.transcript === 'error' ? 'text-red-500' : 'text-gray-500'
-              }`}>
-                {supabaseUploadStatus.transcript === 'success' ? 'Uploaded' :
-                 supabaseUploadStatus.transcript === 'uploading' ? 'Uploading' :
-                 supabaseUploadStatus.transcript === 'error' ? 'Failed' : 'Pending'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-light-text-secondary dark:text-dark-text-secondary">Download Ready:</span>
-              <span className={`font-medium text-xs ${
-                recordingValidated && capturedTranscript.length > 0 ? 'text-green-500' : 'text-yellow-500'
-              }`}>
-                {recordingValidated && capturedTranscript.length > 0 ? 'Yes' : 'Processing...'}
-              </span>
-            </div>
-          </div>
-          
-          {/* Download Info */}
-          <div className="mt-4 p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
-            <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
-              Recording & Storage Information
-            </h4>
-            <ul className="text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
-              <li>• Local screen recording uses VP8 codec for maximum compatibility</li>
-              <li>• Real-time transcript captured every 3 seconds during conversation</li>
-              <li>• Files automatically uploaded to Supabase Storage for cloud backup</li>
-              <li>• Local downloads triggered when you end the session</li>
-              <li>• Supabase provides secure cloud storage with download links</li>
-              <li>• Transcript format: .txt file with timestamps and speaker identification</li>
-              <li>• Recording format: .webm file (compatible with most players)</li>
-              {!recordingActive && !isEnding && !sessionEnded && (
-                <li className="text-yellow-600 dark:text-yellow-400">• Local recording will start automatically after screen share</li>
-              )}
-              {recordingActive && !recordingValidated && (
-                <li className="text-yellow-600 dark:text-yellow-400">• ⏳ Local recording is processing and validating...</li>
-              )}
-              {recordingValidated && (
-                <li className="text-green-600 dark:text-green-400">• ✅ Local recording is active and validated</li>
-              )}
-              {supabaseUploadStatus.recording === 'success' && (
-                <li className="text-green-600 dark:text-green-400">• ✅ Recording backed up to Supabase Storage</li>
-              )}
-              {supabaseUploadStatus.transcript === 'success' && (
-                <li className="text-green-600 dark:text-green-400">• ✅ Transcript backed up to Supabase Storage</li>
-              )}
-              {capturedTranscript.length > 0 && (
-                <li className="text-green-600 dark:text-green-400">• ✅ Transcript capture is working ({capturedTranscript.length} events)</li>
-              )}
-            </ul>
           </div>
         </div>
       </div>
