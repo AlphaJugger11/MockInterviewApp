@@ -1,10 +1,16 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, CheckCircle, Star, Brain, Target, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import { testimonials } from '../data/mockData';
 
 const Landing = () => {
+  // Mark that user has visited the landing page
+  useEffect(() => {
+    localStorage.setItem('visitedLanding', 'true');
+    console.log('✅ Landing page visited, marked in localStorage');
+  }, []);
+
   const features = [
     {
       icon: Brain,
@@ -47,6 +53,13 @@ const Landing = () => {
               <button className="inline-flex items-center px-8 py-4 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary font-semibold rounded-lg hover:bg-light-secondary dark:hover:bg-dark-secondary transition-colors">
                 Watch Demo
               </button>
+            </div>
+            
+            {/* Email Validation Notice */}
+            <div className="mt-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg max-w-2xl mx-auto">
+              <p className="text-blue-600 dark:text-blue-400 text-sm">
+                <strong>📧 Valid Email Required:</strong> Please use a real email address (e.g., user@example.com) for account creation and verification.
+              </p>
             </div>
           </div>
         </div>
@@ -241,8 +254,8 @@ const Landing = () => {
                 Product
               </h4>
               <ul className="space-y-2">
-                <li><a href="#" className="font-inter text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text-primary dark:hover:text-dark-text-primary">Features</a></li>
-                <li><a href="#" className="font-inter text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text-primary dark:hover:text-dark-text-primary">Pricing</a></li>
+                <li><a href="#features" className="font-inter text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text-primary dark:hover:text-dark-text-primary">Features</a></li>
+                <li><a href="#pricing" className="font-inter text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text-primary dark:hover:text-dark-text-primary">Pricing</a></li>
                 <li><a href="#" className="font-inter text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text-primary dark:hover:text-dark-text-primary">API</a></li>
               </ul>
             </div>
