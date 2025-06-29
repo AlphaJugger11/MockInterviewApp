@@ -12,7 +12,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Upload recording blob to Supabase Storage via backend (FIXED)
+ * FIXED: Upload recording blob to Supabase Storage via backend with PROPER MIME TYPE
  */
 export const uploadRecordingToSupabase = async (
   conversationId: string,
@@ -20,13 +20,22 @@ export const uploadRecordingToSupabase = async (
   recordingBlob: Blob
 ): Promise<{ success: boolean; url?: string; error?: string }> => {
   try {
-    console.log('📤 Uploading recording to Supabase via backend...');
-    console.log('📊 Upload details:', {
+    console.log('📤 FIXED Uploading recording to Supabase via backend...');
+    console.log('📊 FIXED Upload details:', {
       conversationId,
       userName,
       blobSize: recordingBlob.size,
-      blobType: recordingBlob.type
+      blobType: recordingBlob.type // Should now be video/webm
     });
+    
+    // VALIDATION: Check MIME type before upload
+    if (!recordingBlob.type || recordingBlob.type === 'text/plain' || recordingBlob.type === '') {
+      console.error('❌ FIXED Invalid blob MIME type:', recordingBlob.type);
+      return { 
+        success: false, 
+        error: `Invalid file type: ${recordingBlob.type}. Expected video/webm or video/mp4.` 
+      };
+    }
     
     // Create FormData to send the blob
     const formData = new FormData();
@@ -43,13 +52,24 @@ export const uploadRecordingToSupabase = async (
     
     fileName = `${fileName}.${fileExtension}`;
     
-    console.log('📁 File details:', {
+    console.log('📁 FIXED File details:', {
       fileName,
       fileExtension,
       mimeType: recordingBlob.type
     });
     
-    formData.append('recording', recordingBlob, fileName);
+    // CRITICAL FIX: Create File object with explicit MIME type
+    const file = new File([recordingBlob], fileName, { 
+      type: recordingBlob.type 
+    });
+    
+    console.log('📁 FIXED File object created:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
+    
+    formData.append('recording', file);
     formData.append('conversationId', conversationId);
     formData.append('userName', userName);
     
@@ -58,11 +78,11 @@ export const uploadRecordingToSupabase = async (
       body: formData
     });
     
-    console.log('📡 Upload response status:', response.status);
+    console.log('📡 FIXED Upload response status:', response.status);
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ Upload response error:', errorText);
+      console.error('❌ FIXED Upload response error:', errorText);
       
       let errorData;
       try {
@@ -75,12 +95,12 @@ export const uploadRecordingToSupabase = async (
     }
     
     const data = await response.json();
-    console.log('✅ Recording uploaded to Supabase successfully:', data.url);
+    console.log('✅ FIXED Recording uploaded to Supabase successfully:', data.url);
     
     return { success: true, url: data.url };
     
   } catch (error) {
-    console.error('❌ Error uploading recording to Supabase:', error);
+    console.error('❌ FIXED Error uploading recording to Supabase:', error);
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Upload failed' 
