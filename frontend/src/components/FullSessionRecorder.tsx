@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Square, Download, Upload, Trash2, AlertCircle } from 'lucide-react';
+import { Play, Square, Download, Upload, Trash2, AlertCircle, Info } from 'lucide-react';
 import { uploadRecordingToSupabase } from '../services/supabaseClient';
 
 interface FullSessionRecorderProps {
@@ -24,6 +24,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [transcript, setTranscript] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [recordingSize, setRecordingSize] = useState<number>(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -32,19 +33,19 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Start recording function
+  // Start recording function with size optimization
   const startRecording = async () => {
     try {
       setError(null);
-      console.log('🎬 Starting client-side recording...');
+      console.log('🎬 Starting client-side recording with size optimization...');
       
-      // Get screen capture with audio
+      // Get screen capture with optimized settings for smaller file size
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           mediaSource: 'screen',
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 }
+          width: { ideal: 1280, max: 1920 }, // Reduced resolution for smaller files
+          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 15, max: 30 } // Reduced frame rate for smaller files
         },
         audio: {
           echoCancellation: true,
@@ -90,7 +91,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
       streamRef.current = combinedStream;
 
-      // Set up MediaRecorder with optimal settings
+      // Set up MediaRecorder with optimized settings for smaller file size
       let mimeType = 'video/webm;codecs=vp8,opus';
       if (!MediaRecorder.isTypeSupported(mimeType)) {
         mimeType = 'video/webm;codecs=vp9,opus';
@@ -103,8 +104,8 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: mimeType,
-        videoBitsPerSecond: 2000000, // 2MB/s for high quality
-        audioBitsPerSecond: 128000   // 128KB/s for audio
+        videoBitsPerSecond: 1000000, // Reduced to 1MB/s for smaller files
+        audioBitsPerSecond: 64000    // 64KB/s for audio
       });
 
       chunksRef.current = [];
@@ -112,7 +113,25 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           chunksRef.current.push(event.data);
-          console.log('📊 Recording chunk:', event.data.size, 'bytes');
+          
+          // Calculate current recording size
+          const currentSize = chunksRef.current.reduce((total, chunk) => total + chunk.size, 0);
+          setRecordingSize(currentSize);
+          
+          console.log('📊 Recording chunk:', event.data.size, 'bytes, Total:', Math.round(currentSize / 1024 / 1024), 'MB');
+          
+          // Warn if approaching 50MB limit
+          const maxSize = 50 * 1024 * 1024; // 50MB
+          if (currentSize > maxSize * 0.8) { // 80% of limit
+            console.warn('⚠️ Recording approaching size limit:', Math.round(currentSize / 1024 / 1024), 'MB');
+            setError(`Recording size: ${Math.round(currentSize / 1024 / 1024)}MB. Approaching 50MB limit.`);
+          }
+          
+          // Auto-stop if reaching limit
+          if (currentSize > maxSize * 0.95) { // 95% of limit
+            console.warn('🛑 Auto-stopping recording due to size limit');
+            stopRecording();
+          }
         }
       };
 
@@ -122,9 +141,12 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         
         console.log('📊 Final blob details:', {
           size: blob.size,
+          sizeMB: Math.round(blob.size / 1024 / 1024),
           type: blob.type,
           chunks: chunksRef.current.length
         });
+        
+        setRecordingSize(blob.size);
         
         if (blob.size > 1000) { // Ensure minimum file size
           setRecordedBlob(blob);
@@ -140,10 +162,16 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
             timestamp: new Date().toISOString()
           }));
 
-          console.log('✅ Recording processed successfully:', blob.size, 'bytes');
+          console.log('✅ Recording processed successfully:', Math.round(blob.size / 1024 / 1024), 'MB');
           
-          // Auto-upload to Supabase
-          await uploadToSupabase(blob);
+          // Check size before auto-upload
+          const maxSize = 50 * 1024 * 1024; // 50MB
+          if (blob.size <= maxSize) {
+            await uploadToSupabase(blob);
+          } else {
+            setError(`Recording too large (${Math.round(blob.size / 1024 / 1024)}MB) for Supabase free tier. Maximum: 50MB. Please use local download.`);
+            setUploadStatus('error');
+          }
           
           if (onRecordingComplete) {
             onRecordingComplete({
@@ -166,11 +194,12 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         setUploadStatus('error');
       };
 
-      // Start recording
-      mediaRecorder.start(1000); // Collect data every second
+      // Start recording with larger intervals for smaller file size
+      mediaRecorder.start(2000); // Collect data every 2 seconds
       mediaRecorderRef.current = mediaRecorder;
       setIsRecording(true);
       setRecordingDuration(0);
+      setRecordingSize(0);
 
       // Start duration timer
       durationIntervalRef.current = setInterval(() => {
@@ -186,7 +215,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         stopRecording();
       });
 
-      console.log('✅ Client-side recording started successfully');
+      console.log('✅ Client-side recording started successfully with size optimization');
 
     } catch (error) {
       console.error('❌ Error starting recording:', error);
@@ -245,7 +274,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
     transcriptIntervalRef.current = setInterval(captureTranscript, 3000);
   };
 
-  // Upload to Supabase (FIXED)
+  // Upload to Supabase with size check
   const uploadToSupabase = async (blob: Blob) => {
     setIsUploading(true);
     setUploadStatus('uploading');
@@ -254,10 +283,17 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       console.log('☁️ Uploading to Supabase Storage...');
       console.log('📊 Blob details for upload:', {
         size: blob.size,
+        sizeMB: Math.round(blob.size / 1024 / 1024),
         type: blob.type,
         conversationId,
         userName
       });
+      
+      // Check size limit before upload
+      const maxSize = 50 * 1024 * 1024; // 50MB
+      if (blob.size > maxSize) {
+        throw new Error(`File too large (${Math.round(blob.size / 1024 / 1024)}MB). Maximum allowed: 50MB for Supabase free tier.`);
+      }
       
       const result = await uploadRecordingToSupabase(conversationId, userName, blob);
       
@@ -315,6 +351,15 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Format file size
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -335,6 +380,15 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
         Client-Side Recording System
       </h3>
+
+      {/* Supabase Size Limit Warning */}
+      <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start space-x-2">
+        <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+        <div className="text-blue-600 dark:text-blue-400 text-sm">
+          <p className="font-medium">Supabase Free Tier Limit: 50MB per file</p>
+          <p>Recording optimized for smaller file size. Large recordings will be available for local download only.</p>
+        </div>
+      </div>
 
       {/* Error Display */}
       {error && (
@@ -365,11 +419,21 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         )}
 
         {isRecording && (
-          <div className="flex items-center space-x-2">
-            <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-            <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
-              Recording: {formatDuration(recordingDuration)}
-            </span>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+              <span className="text-light-text-primary dark:text-dark-text-primary font-medium">
+                {formatDuration(recordingDuration)}
+              </span>
+            </div>
+            <div className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
+              Size: {formatFileSize(recordingSize)}
+              {recordingSize > 0 && (
+                <span className={`ml-2 ${recordingSize > 40 * 1024 * 1024 ? 'text-orange-500' : 'text-green-500'}`}>
+                  ({Math.round((recordingSize / (50 * 1024 * 1024)) * 100)}% of 50MB limit)
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -378,7 +442,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       {recordingUrl && (
         <div className="mb-4">
           <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
-            Recording Preview
+            Recording Preview ({formatFileSize(recordedBlob?.size || 0)})
           </h4>
           <video
             ref={videoRef}
@@ -426,7 +490,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
           </button>
         )}
 
-        {recordedBlob && !isUploading && uploadStatus !== 'success' && (
+        {recordedBlob && !isUploading && uploadStatus !== 'success' && recordedBlob.size <= 50 * 1024 * 1024 && (
           <button
             onClick={() => uploadToSupabase(recordedBlob)}
             className="inline-flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
@@ -458,9 +522,10 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
       {/* Recording Info */}
       <div className="mt-4 text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
-        <p>• Client-side recording captures screen + microphone audio</p>
-        <p>• Files automatically uploaded to Supabase Storage</p>
-        <p>• Recordings deleted after session for storage optimization</p>
+        <p>• Recording optimized for Supabase 50MB limit (reduced resolution/bitrate)</p>
+        <p>• Files larger than 50MB available for local download only</p>
+        <p>• Automatic upload to Supabase Storage for files under 50MB</p>
+        <p>• Recordings deleted from cloud after session for storage optimization</p>
         <p>• Transcript captured in real-time for AI analysis</p>
         <p>• WebM format with VP8/VP9 codec for maximum compatibility</p>
       </div>

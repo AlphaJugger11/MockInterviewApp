@@ -20,7 +20,7 @@ export const RECORDINGS_BUCKET = 'interview-recordings';
 export const TRANSCRIPTS_BUCKET = 'interview-transcripts';
 
 /**
- * Initialize storage buckets if they don't exist (FIXED)
+ * Initialize storage buckets if they don't exist (FIXED for Supabase limits)
  */
 export const initializeStorageBuckets = async (): Promise<void> => {
   try {
@@ -32,11 +32,24 @@ export const initializeStorageBuckets = async (): Promise<void> => {
       const { error: createRecordingsError } = await supabase.storage.createBucket(RECORDINGS_BUCKET, {
         public: false,
         allowedMimeTypes: ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4'],
-        fileSizeLimit: 1024 * 1024 * 1024 // FIXED: 1GB limit instead of 500MB
+        fileSizeLimit: 1024 * 1024 * 50 // FIXED: 50MB limit (Supabase free tier maximum)
       });
       
       if (createRecordingsError) {
         console.error('❌ Error creating recordings bucket:', createRecordingsError);
+        
+        // Try without file size limit if it fails
+        console.log('🔄 Retrying bucket creation without file size limit...');
+        const { error: retryError } = await supabase.storage.createBucket(RECORDINGS_BUCKET, {
+          public: false,
+          allowedMimeTypes: ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4']
+        });
+        
+        if (retryError) {
+          console.error('❌ Error creating recordings bucket (retry):', retryError);
+        } else {
+          console.log('✅ Recordings bucket created successfully (without size limit)');
+        }
       } else {
         console.log('✅ Recordings bucket created successfully');
       }
@@ -54,11 +67,24 @@ export const initializeStorageBuckets = async (): Promise<void> => {
       const { error: createTranscriptsError } = await supabase.storage.createBucket(TRANSCRIPTS_BUCKET, {
         public: false,
         allowedMimeTypes: ['text/plain', 'application/json'],
-        fileSizeLimit: 1024 * 1024 * 50 // 50MB limit for transcripts
+        fileSizeLimit: 1024 * 1024 * 10 // 10MB limit for transcripts
       });
       
       if (createTranscriptsError) {
         console.error('❌ Error creating transcripts bucket:', createTranscriptsError);
+        
+        // Try without file size limit if it fails
+        console.log('🔄 Retrying transcripts bucket creation without file size limit...');
+        const { error: retryError } = await supabase.storage.createBucket(TRANSCRIPTS_BUCKET, {
+          public: false,
+          allowedMimeTypes: ['text/plain', 'application/json']
+        });
+        
+        if (retryError) {
+          console.error('❌ Error creating transcripts bucket (retry):', retryError);
+        } else {
+          console.log('✅ Transcripts bucket created successfully (without size limit)');
+        }
       } else {
         console.log('✅ Transcripts bucket created successfully');
       }
@@ -74,7 +100,7 @@ export const initializeStorageBuckets = async (): Promise<void> => {
 };
 
 /**
- * Upload recording file to Supabase Storage (FIXED)
+ * Upload recording file to Supabase Storage (FIXED for size limits)
  */
 export const uploadRecording = async (
   conversationId: string,
@@ -83,7 +109,17 @@ export const uploadRecording = async (
   mimeType: string = 'video/webm'
 ): Promise<{ success: boolean; url?: string; error?: string }> => {
   try {
-    // FIXED: Better file extension detection
+    // Check file size before upload (50MB limit for Supabase free tier)
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (fileBuffer.length > maxSize) {
+      console.warn('⚠️ File too large for Supabase free tier:', fileBuffer.length, 'bytes');
+      return { 
+        success: false, 
+        error: `File too large (${Math.round(fileBuffer.length / 1024 / 1024)}MB). Maximum allowed: 50MB for Supabase free tier.` 
+      };
+    }
+    
+    // Better file extension detection
     let extension = 'webm';
     if (mimeType.includes('mp4')) {
       extension = 'mp4';
@@ -96,6 +132,7 @@ export const uploadRecording = async (
     console.log('📤 Uploading recording to Supabase:', {
       fileName,
       size: fileBuffer.length,
+      sizeMB: Math.round(fileBuffer.length / 1024 / 1024),
       mimeType
     });
     
@@ -153,9 +190,15 @@ export const uploadTranscript = async (
       eventCount: transcript.length
     };
     
+    const transcriptString = JSON.stringify(transcriptData, null, 2);
+    
+    // Check transcript size (should be much smaller than recordings)
+    const transcriptSize = new Blob([transcriptString]).size;
+    console.log('📊 Transcript size:', transcriptSize, 'bytes');
+    
     const { data, error } = await supabase.storage
       .from(TRANSCRIPTS_BUCKET)
-      .upload(fileName, JSON.stringify(transcriptData, null, 2), {
+      .upload(fileName, transcriptString, {
         contentType: 'application/json',
         upsert: false
       });
