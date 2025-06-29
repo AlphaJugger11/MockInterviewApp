@@ -17,43 +17,57 @@ import { validateInterviewRequest, validateConversationRequest } from '../middle
 
 const router = express.Router();
 
-// Configure multer for file uploads with FIXED file filter for WebM files
+// FIXED: Configure multer with PROPER FILE TYPE DETECTION
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit (Supabase free tier maximum)
+    fileSize: 50 * 1024 * 1024, // 50MB limit
   },
   fileFilter: (req, file, cb) => {
-    console.log('📁 File upload attempt:', {
+    console.log('📁 FIXED File upload attempt:', {
       fieldname: file.fieldname,
       originalname: file.originalname,
       mimetype: file.mimetype,
       size: file.size
     });
     
-    // FIXED: Accept WebM video files specifically and handle MIME type issues
+    // CRITICAL FIX: Proper MIME type detection and validation
     const allowedMimeTypes = [
       'video/webm',
       'video/mp4',
-      'audio/webm',
+      'audio/webm', 
       'audio/mp4',
       'video/x-msvideo', // .avi
       'video/quicktime'  // .mov
     ];
     
-    // CRITICAL FIX: Handle cases where MIME type might be incorrectly detected
-    const isVideoFile = file.mimetype.startsWith('video/') || 
-                       file.mimetype.startsWith('audio/') ||
-                       allowedMimeTypes.includes(file.mimetype) ||
-                       file.originalname.toLowerCase().endsWith('.webm') ||
-                       file.originalname.toLowerCase().endsWith('.mp4');
+    // ENHANCED: Check both MIME type AND file extension
+    const isValidMimeType = allowedMimeTypes.includes(file.mimetype);
+    const hasValidExtension = file.originalname && (
+      file.originalname.toLowerCase().endsWith('.webm') ||
+      file.originalname.toLowerCase().endsWith('.mp4') ||
+      file.originalname.toLowerCase().endsWith('.avi') ||
+      file.originalname.toLowerCase().endsWith('.mov')
+    );
     
-    if (isVideoFile) {
-      console.log('✅ File type accepted:', file.mimetype, 'Original name:', file.originalname);
+    console.log('🔍 FIXED File validation:', {
+      mimetype: file.mimetype,
+      isValidMimeType,
+      hasValidExtension,
+      filename: file.originalname
+    });
+    
+    // FIXED: Accept if EITHER MIME type is valid OR extension is valid
+    if (isValidMimeType || hasValidExtension) {
+      console.log('✅ FIXED File type accepted:', file.mimetype, 'Original name:', file.originalname);
       cb(null, true);
     } else {
-      console.error('❌ File type rejected:', file.mimetype, 'Original name:', file.originalname);
-      cb(new Error(`File type not allowed: ${file.mimetype}. Only video and audio files are accepted. Supported formats: WebM, MP4.`));
+      console.error('❌ FIXED File type rejected:', {
+        mimetype: file.mimetype,
+        filename: file.originalname,
+        allowedTypes: allowedMimeTypes
+      });
+      cb(new Error(`File type not allowed: ${file.mimetype}. Only video and audio files are accepted. Supported formats: WebM, MP4, AVI, MOV.`));
     }
   }
 });
