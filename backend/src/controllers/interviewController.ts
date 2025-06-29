@@ -115,7 +115,8 @@ export const conversationCallback = async (
           console.log(`📝 Transcript Item ${index + 1}:`, {
             role: item.role,
             content: item.content?.substring(0, 100) + '...',
-            timestamp: item.timestamp || 'no timestamp'
+            timestamp: item.timestamp || 'no timestamp',
+            fullContent: item.content // FULL CONTENT FOR DEBUGGING
           });
         });
         
@@ -198,34 +199,38 @@ export const getConversation = async (
         });
       });
       
-      // Format webhook transcript for frontend
+      // FIXED: Format webhook transcript for frontend with PROPER CONTENT HANDLING
       let formattedTranscript = '';
       let transcriptEvents: any[] = [];
       
       transcriptEvents = storedTranscript.map((item, index) => {
         const participant = item.role === 'assistant' ? 'ai' : 'user';
-        const content = item.content || '';
+        const content = item.content || item.text || item.message || ''; // FIXED: Check multiple content fields
         
         return {
           id: index + 1,
           participant: participant,
           content: content,
-          timestamp: new Date().toISOString(),
+          timestamp: item.timestamp || new Date().toISOString(),
           source: 'webhook'
         };
       });
       
-      formattedTranscript = transcriptEvents.map(event => 
+      // FIXED: Filter out empty content and format properly
+      const validEvents = transcriptEvents.filter(event => event.content && event.content.trim().length > 0);
+      
+      formattedTranscript = validEvents.map(event => 
         `${event.participant === 'ai' ? 'Interviewer (Sarah)' : 'Candidate'}: ${event.content}`
       ).join('\n\n');
       
       console.log('📄 FORMATTED TRANSCRIPT PREVIEW:', formattedTranscript.substring(0, 500) + '...');
+      console.log('📊 Valid events after filtering:', validEvents.length);
       
       res.status(200).json({
         success: true,
         conversationId: conversationId,
         transcript: formattedTranscript,
-        transcriptEvents: transcriptEvents,
+        transcriptEvents: validEvents,
         hasWebhookData: true,
         dataSource: 'webhook',
         recordingUrl: storedRecording?.recording_url || null,
@@ -258,12 +263,15 @@ export const getConversation = async (
         const transcriptEvents = conversationResponse.data.transcript.map((event: any, index: number) => ({
           id: index + 1,
           participant: event.role === 'assistant' ? 'ai' : 'user',
-          content: event.content || '',
+          content: event.content || event.text || event.message || '',
           timestamp: event.timestamp || new Date().toISOString(),
           source: 'api_verbose'
         }));
         
-        const formattedTranscript = transcriptEvents.map((event: any) => 
+        // Filter out empty content
+        const validEvents = transcriptEvents.filter(event => event.content && event.content.trim().length > 0);
+        
+        const formattedTranscript = validEvents.map((event: any) => 
           `${event.participant === 'ai' ? 'Interviewer (Sarah)' : 'Candidate'}: ${event.content}`
         ).join('\n\n');
         
@@ -273,7 +281,7 @@ export const getConversation = async (
           success: true,
           conversationId: conversationId,
           transcript: formattedTranscript,
-          transcriptEvents: transcriptEvents,
+          transcriptEvents: validEvents,
           hasWebhookData: false,
           dataSource: 'api_verbose',
           timestamp: new Date().toISOString()
@@ -289,12 +297,15 @@ export const getConversation = async (
         const transcriptEvents = conversationResponse.data.events.map((event: any, index: number) => ({
           id: index + 1,
           participant: event.role === 'assistant' ? 'ai' : 'user',
-          content: event.content || '',
+          content: event.content || event.text || event.message || '',
           timestamp: event.timestamp || new Date().toISOString(),
           source: 'api'
         }));
         
-        const formattedTranscript = transcriptEvents.map((event: any) => 
+        // Filter out empty content
+        const validEvents = transcriptEvents.filter(event => event.content && event.content.trim().length > 0);
+        
+        const formattedTranscript = validEvents.map((event: any) => 
           `${event.participant === 'ai' ? 'Interviewer (Sarah)' : 'Candidate'}: ${event.content}`
         ).join('\n\n');
         
@@ -304,7 +315,7 @@ export const getConversation = async (
           success: true,
           conversationId: conversationId,
           transcript: formattedTranscript,
-          transcriptEvents: transcriptEvents,
+          transcriptEvents: validEvents,
           hasWebhookData: false,
           dataSource: 'api_fallback',
           timestamp: new Date().toISOString()
@@ -500,16 +511,17 @@ export const analyzeInterview = async (
       if (storedTranscript && Array.isArray(storedTranscript)) {
         console.log('✅ Using WEBHOOK transcript data for analysis');
         
-        // Build real transcript from webhook data
+        // FIXED: Build real transcript from webhook data with proper content handling
         realTranscript = storedTranscript.map((item: any) => {
           const speaker = item.role === 'assistant' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
-          return `${speaker}: ${item.content}`;
-        }).join('\n\n');
+          const content = item.content || item.text || item.message || '';
+          return content ? `${speaker}: ${content}` : '';
+        }).filter(line => line.length > 0).join('\n\n');
         
-        // Extract candidate answers
+        // Extract candidate answers with proper content handling
         realAnswers = storedTranscript
           .filter((item: any) => item.role !== 'assistant')
-          .map((item: any) => item.content)
+          .map((item: any) => item.content || item.text || item.message || '')
           .filter((content: string) => content && content.length > 20);
         
         dataSource = 'real_conversation';
@@ -537,12 +549,13 @@ export const analyzeInterview = async (
           if (conversationResponse.data.transcript && Array.isArray(conversationResponse.data.transcript)) {
             realTranscript = conversationResponse.data.transcript.map((event: any) => {
               const speaker = event.role === 'assistant' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
-              return `${speaker}: ${event.content}`;
-            }).join('\n\n');
+              const content = event.content || event.text || event.message || '';
+              return content ? `${speaker}: ${content}` : '';
+            }).filter(line => line.length > 0).join('\n\n');
             
             realAnswers = conversationResponse.data.transcript
               .filter((event: any) => event.role !== 'assistant')
-              .map((event: any) => event.content)
+              .map((event: any) => event.content || event.text || event.message || '')
               .filter((content: string) => content && content.length > 20);
             
             dataSource = 'api_conversation';
@@ -555,12 +568,13 @@ export const analyzeInterview = async (
           else if (conversationResponse.data.events && conversationResponse.data.events.length > 0) {
             realTranscript = conversationResponse.data.events.map((event: any) => {
               const speaker = event.role === 'assistant' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
-              return `${speaker}: ${event.content}`;
-            }).join('\n\n');
+              const content = event.content || event.text || event.message || '';
+              return content ? `${speaker}: ${content}` : '';
+            }).filter(line => line.length > 0).join('\n\n');
             
             realAnswers = conversationResponse.data.events
               .filter((event: any) => event.role !== 'assistant')
-              .map((event: any) => event.content)
+              .map((event: any) => event.content || event.text || event.message || '')
               .filter((content: string) => content && content.length > 20);
             
             dataSource = 'api_conversation';
@@ -902,12 +916,25 @@ export const uploadRecordingFile = async (
       buffer: !!file.buffer
     });
 
-    // FIXED: Validate MIME type
+    // FIXED: Validate MIME type with enhanced checking
     const allowedMimeTypes = ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4'];
-    if (!allowedMimeTypes.includes(file.mimetype)) {
+    const allowedExtensions = ['.webm', '.mp4', '.avi', '.mov'];
+    
+    const hasValidMimeType = allowedMimeTypes.includes(file.mimetype);
+    const hasValidExtension = allowedExtensions.some(ext => 
+      file.originalname?.toLowerCase().endsWith(ext)
+    );
+    
+    if (!hasValidMimeType && !hasValidExtension) {
+      console.error('❌ Invalid file type:', { 
+        mimetype: file.mimetype, 
+        filename: file.originalname,
+        allowedMimeTypes,
+        allowedExtensions
+      });
       res.status(400).json({
         success: false,
-        error: `mime type ${file.mimetype} is not supported`
+        error: `Invalid file type: ${file.mimetype}. Expected video/webm, video/mp4, audio/webm, or audio/mp4.`
       });
       return;
     }

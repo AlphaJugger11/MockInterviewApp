@@ -88,8 +88,9 @@ const Sessions = () => {
 
   const downloadTranscript = async (session: UserSession) => {
     try {
-      // Try to get transcript from localStorage first
-      const storedTranscript = localStorage.getItem(`transcript_${session.conversationId}`);
+      // FIXED: Try to get transcript from localStorage with enhanced content handling
+      const storedTranscript = localStorage.getItem(`transcript_${session.conversationId}`) || 
+                              localStorage.getItem(`live_transcript_${session.conversationId}`);
       
       if (storedTranscript) {
         const transcriptData = JSON.parse(storedTranscript);
@@ -99,12 +100,16 @@ const Sessions = () => {
           return;
         }
         
-        // Format transcript for download
+        // FIXED: Format transcript for download with enhanced content handling
         const formattedTranscript = transcriptData.map((event: any) => {
           const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
           const timestamp = new Date(event.timestamp).toLocaleTimeString();
-          return `[${timestamp}] ${speaker}: ${event.content}`;
-        }).join('\n\n');
+          
+          // FIXED: Check multiple content fields for robust parsing
+          const content = event.content || event.text || event.message || '';
+          
+          return content ? `[${timestamp}] ${speaker}: ${content}` : '';
+        }).filter((line: string) => line.length > 0).join('\n\n');
         
         // Add header
         const header = `INTERVIEW TRANSCRIPT
@@ -116,6 +121,7 @@ Date: ${session.date}
 Duration: ${session.duration}
 Conversation ID: ${session.conversationId}
 Events Count: ${transcriptData.length}
+Valid Content Lines: ${formattedTranscript.split('\n\n').length}
 
 TRANSCRIPT:
 ===========
@@ -123,6 +129,12 @@ TRANSCRIPT:
 `;
         
         const fullTranscript = header + formattedTranscript;
+        
+        // FIXED: Only proceed if we have actual content
+        if (formattedTranscript.trim().length === 0) {
+          alert('No valid transcript content found for this session. The transcript may be empty or corrupted.');
+          return;
+        }
         
         // Create and trigger download
         const blob = new Blob([fullTranscript], { type: 'text/plain;charset=utf-8' });
@@ -140,6 +152,11 @@ TRANSCRIPT:
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         
         console.log('📄 Transcript download triggered successfully');
+        console.log('📊 Transcript stats:', {
+          totalEvents: transcriptData.length,
+          validLines: formattedTranscript.split('\n\n').length,
+          contentLength: formattedTranscript.length
+        });
       } else {
         alert('No transcript data available for this session.');
       }

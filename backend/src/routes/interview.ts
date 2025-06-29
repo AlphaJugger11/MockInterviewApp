@@ -57,7 +57,7 @@ const upload = multer({
       filename: file.originalname
     });
     
-    // FIXED: Accept if EITHER MIME type is valid OR extension is valid
+    // FIXED: Accept if EITHER MIME type is valid OR extension is valid (Based on Supabase example)
     if (isValidMimeType || hasValidExtension) {
       console.log('✅ FIXED File type accepted:', file.mimetype, 'Original name:', file.originalname);
       cb(null, true);

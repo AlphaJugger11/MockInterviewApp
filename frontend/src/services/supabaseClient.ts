@@ -34,7 +34,7 @@ export const uploadRecordingToSupabase = async (
       console.error('❌ FIXED Invalid blob MIME type:', recordingBlob.type);
       return { 
         success: false, 
-        error: `Invalid file type: ${recordingBlob.type}. Expected video/webm or video/mp4.` 
+        error: `Invalid file type: ${recordingBlob.type}. Expected video/webm, video/mp4, audio/webm, or audio/mp4.` 
       };
     }
     

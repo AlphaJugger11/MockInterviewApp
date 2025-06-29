@@ -376,7 +376,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
           console.warn('⚠️ Transcript API error response:', response.status, response.statusText);
         }
       } catch (error) {
-        console.warn('⚠️ Error capturing live transcript:', error instanceof Error ? error.message : 'Unknown error');
+        console.warn('⚠️ Error capturing live transcript (expected during timeouts):', error instanceof Error ? error.message : 'Unknown error');
       }
     };
 
@@ -419,7 +419,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       const allowedMimeTypes = ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4'];
       if (!blob.type || !allowedMimeTypes.includes(blob.type)) {
         console.error('❌ Invalid blob MIME type detected:', blob.type);
-        throw new Error(`Invalid file type: ${blob.type}. Expected video/webm or video/mp4.`);
+        throw new Error(`Invalid file type: ${blob.type}. Expected video/webm, video/mp4, audio/webm, or audio/mp4.`);
       }
       
       // Check size limit
@@ -698,6 +698,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         <p>• Recording optimized for Supabase 50MB limit with proper file validation</p>
         <p>• Backend now accepts files with correct MIME type detection</p>
         <p>• AI analysis uses REAL webhook transcript data for accurate feedback</p>
+        <p>• Enhanced content field checking (content, text, message) for robust transcript parsing</p>
       </div>
     </div>
   );
