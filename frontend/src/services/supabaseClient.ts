@@ -12,7 +12,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * FIXED: Upload recording blob to Supabase Storage via backend with PROPER MIME TYPE
+ * FIXED: Upload recording blob to Supabase Storage via backend with PROPER MIME TYPE (Based on Supabase example)
  */
 export const uploadRecordingToSupabase = async (
   conversationId: string,
@@ -28,8 +28,9 @@ export const uploadRecordingToSupabase = async (
       blobType: recordingBlob.type // Should now be video/webm
     });
     
-    // VALIDATION: Check MIME type before upload
-    if (!recordingBlob.type || recordingBlob.type === 'text/plain' || recordingBlob.type === '') {
+    // VALIDATION: Check MIME type before upload (Based on Supabase example)
+    const allowedMimeTypes = ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4'];
+    if (!recordingBlob.type || !allowedMimeTypes.includes(recordingBlob.type)) {
       console.error('❌ FIXED Invalid blob MIME type:', recordingBlob.type);
       return { 
         success: false, 
@@ -40,7 +41,7 @@ export const uploadRecordingToSupabase = async (
     // Create FormData to send the blob
     const formData = new FormData();
     
-    // FIXED: Ensure proper file extension and MIME type
+    // FIXED: Ensure proper file extension and MIME type (Based on Supabase example)
     let fileName = `${userName}-${Date.now()}`;
     let fileExtension = 'webm';
     
@@ -58,9 +59,9 @@ export const uploadRecordingToSupabase = async (
       mimeType: recordingBlob.type
     });
     
-    // CRITICAL FIX: Create File object with explicit MIME type
+    // CRITICAL FIX: Create File object with explicit MIME type (Based on Supabase example)
     const file = new File([recordingBlob], fileName, { 
-      type: recordingBlob.type 
+      type: recordingBlob.type // Use the correct MIME type from the blob
     });
     
     console.log('📁 FIXED File object created:', {

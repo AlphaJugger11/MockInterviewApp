@@ -82,7 +82,7 @@ Generate a complete system prompt that establishes Sarah's identity, role, and r
   }
 };
 
-// FIXED: Enhanced conversation callback with PROPER TRANSCRIPT STORAGE
+// FIXED: Enhanced conversation callback with PROPER TRANSCRIPT STORAGE (Based on Tavus AI feedback)
 export const conversationCallback = async (
   req: Request,
   res: Response,
@@ -110,7 +110,7 @@ export const conversationCallback = async (
       
       // DETAILED TRANSCRIPT LOGGING
       if (Array.isArray(transcript)) {
-        console.log('✅ WEBHOOK TRANSCRIPT RECEIVED:');
+        console.log('✅ WEBHOOK TRANSCRIPT RECEIVED with', transcript.length, 'events');
         transcript.forEach((item, index) => {
           console.log(`📝 Transcript Item ${index + 1}:`, {
             role: item.role,
@@ -166,7 +166,7 @@ export const conversationCallback = async (
   }
 };
 
-// FIXED: Enhanced get conversation with PROPER WEBHOOK DATA HANDLING
+// FIXED: Enhanced get conversation with PROPER WEBHOOK DATA HANDLING and VERBOSE MODE (Based on Tavus AI feedback)
 export const getConversation = async (
   req: Request,
   res: Response,
@@ -234,34 +234,33 @@ export const getConversation = async (
       return;
     }
     
-    // PRIORITY 2: Try Tavus API with short timeout (non-blocking)
-    console.log('📡 Trying Tavus API with short timeout...');
+    // PRIORITY 2: Try Tavus API with VERBOSE MODE (Based on Tavus AI feedback)
+    console.log('📡 Trying Tavus API with VERBOSE MODE...');
     
     try {
       const conversationResponse = await axios.get(
-        `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+        `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`, // FIXED: Added verbose=true
         {
           headers: { 
             'x-api-key': TAVUS_API_KEY,
             'Content-Type': 'application/json'
           },
-          timeout: 3000 // REDUCED: 3 second timeout (was 15 seconds)
+          timeout: 10000 // 10 second timeout
         }
       );
       
       console.log('✅ Retrieved conversation data from Tavus API:', Object.keys(conversationResponse.data));
       
-      // Check if transcript is available in API response
-      if (conversationResponse.data.events && conversationResponse.data.events.length > 0) {
-        console.log('📝 API transcript events found:', conversationResponse.data.events.length);
+      // FIXED: Check for transcript in verbose response (Based on Tavus AI feedback)
+      if (conversationResponse.data.transcript && Array.isArray(conversationResponse.data.transcript)) {
+        console.log('📝 API transcript found:', conversationResponse.data.transcript.length);
         
-        // Format API transcript
-        const transcriptEvents = conversationResponse.data.events.map((event: any, index: number) => ({
+        const transcriptEvents = conversationResponse.data.transcript.map((event: any, index: number) => ({
           id: index + 1,
           participant: event.role === 'assistant' ? 'ai' : 'user',
           content: event.content || '',
           timestamp: event.timestamp || new Date().toISOString(),
-          source: 'api'
+          source: 'api_verbose'
         }));
         
         const formattedTranscript = transcriptEvents.map((event: any) => 
@@ -276,6 +275,37 @@ export const getConversation = async (
           transcript: formattedTranscript,
           transcriptEvents: transcriptEvents,
           hasWebhookData: false,
+          dataSource: 'api_verbose',
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+      
+      // Check for events array as fallback
+      if (conversationResponse.data.events && conversationResponse.data.events.length > 0) {
+        console.log('📝 API events found:', conversationResponse.data.events.length);
+        
+        // Format API transcript
+        const transcriptEvents = conversationResponse.data.events.map((event: any, index: number) => ({
+          id: index + 1,
+          participant: event.role === 'assistant' ? 'ai' : 'user',
+          content: event.content || '',
+          timestamp: event.timestamp || new Date().toISOString(),
+          source: 'api'
+        }));
+        
+        const formattedTranscript = transcriptEvents.map((event: any) => 
+          `${event.participant === 'ai' ? 'Interviewer (Sarah)' : 'Candidate'}: ${event.content}`
+        ).join('\n\n');
+        
+        console.log('📄 API EVENTS TRANSCRIPT PREVIEW:', formattedTranscript.substring(0, 500) + '...');
+        
+        res.status(200).json({
+          success: true,
+          conversationId: conversationId,
+          transcript: formattedTranscript,
+          transcriptEvents: transcriptEvents,
+          hasWebhookData: false,
           dataSource: 'api_fallback',
           timestamp: new Date().toISOString()
         });
@@ -283,7 +313,7 @@ export const getConversation = async (
       }
       
     } catch (apiError) {
-      console.warn('⚠️ Tavus API timeout/error (expected):', apiError instanceof Error ? apiError.message : 'Unknown error');
+      console.warn('⚠️ Tavus API error:', apiError instanceof Error ? apiError.message : 'Unknown error');
     }
     
     // PRIORITY 3: Return empty response (non-blocking)
@@ -309,7 +339,7 @@ export const getConversation = async (
   }
 };
 
-// FIXED: Create conversation with CORRECT TAVUS API FORMAT
+// FIXED: Create conversation with CORRECT TAVUS API FORMAT (Based on Tavus AI feedback)
 export const createConversation = async (
   req: Request,
   res: Response,
@@ -318,12 +348,22 @@ export const createConversation = async (
   try {
     const { jobTitle, userName, customInstructions, customCriteria } = req.body;
     
-    console.log('🚀 Creating conversation with FIXED TAVUS API format:', { 
+    console.log('🚀 Creating conversation with CORRECT TAVUS API format:', { 
       jobTitle, 
       userName, 
       customInstructions: !!customInstructions,
       customCriteria: !!customCriteria
     });
+
+    // Validate environment variables
+    if (!TAVUS_API_KEY || !TAVUS_REPLICA_ID) {
+      console.error('❌ Missing Tavus configuration');
+      res.status(500).json({
+        success: false,
+        error: 'Tavus API configuration is missing. Please check environment variables.'
+      });
+      return;
+    }
 
     // Generate conversational context
     let conversationalContext = '';
@@ -356,7 +396,7 @@ Keep responses conversational and professional. Make ${userName} feel comfortabl
 
     console.log('📝 Generated conversational context length:', conversationalContext.length);
 
-    // FIXED: Create conversation with CORRECT Tavus API format
+    // FIXED: Create conversation with CORRECT Tavus API format (Based on Tavus AI feedback)
     const conversationData = {
       replica_id: TAVUS_REPLICA_ID,
       conversational_context: conversationalContext,
@@ -366,13 +406,11 @@ Keep responses conversational and professional. Make ${userName} feel comfortabl
         participant_absent_timeout: 600, // 10 minutes
         participant_left_timeout: 30, // 30 seconds
         enable_recording: true
-        // REMOVED: enable_transcription (doesn't exist in Tavus API)
-        // REMOVED: transcription_webhook_url (invalid field)
-        // REMOVED: recording_webhook_url (invalid field)
+        // FIXED: Tavus handles transcription automatically, no need to enable it separately
       }
     };
 
-    console.log('📡 FIXED Tavus API request:', {
+    console.log('📡 CORRECT Tavus API request:', {
       replica_id: conversationData.replica_id,
       callback_url: conversationData.callback_url,
       properties: conversationData.properties,
@@ -391,7 +429,7 @@ Keep responses conversational and professional. Make ${userName} feel comfortabl
       }
     );
 
-    console.log('✅ FIXED Conversation created successfully:', response.data);
+    console.log('✅ CORRECT Conversation created successfully:', response.data);
 
     const { conversation_id, conversation_url } = response.data;
 
@@ -409,7 +447,7 @@ Keep responses conversational and professional. Make ${userName} feel comfortabl
 
     res.status(200).json({
       success: true,
-      message: 'Conversation created successfully with FIXED webhook setup',
+      message: 'Conversation created successfully with CORRECT webhook setup',
       conversation_id,
       conversation_url,
       sessionData,
@@ -480,10 +518,10 @@ export const analyzeInterview = async (
         console.log('✅ Extracted', realAnswers.length, 'real answers from transcript');
         
       } else {
-        // Try Tavus API as fallback
+        // Try Tavus API as fallback with VERBOSE MODE
         try {
           const conversationResponse = await axios.get(
-            `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+            `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`, // FIXED: Added verbose=true
             {
               headers: { 
                 'x-api-key': TAVUS_API_KEY,
@@ -495,7 +533,26 @@ export const analyzeInterview = async (
           
           console.log('📊 Retrieved conversation data from Tavus API:', Object.keys(conversationResponse.data));
           
-          if (conversationResponse.data.events && conversationResponse.data.events.length > 0) {
+          // Check for transcript in verbose response
+          if (conversationResponse.data.transcript && Array.isArray(conversationResponse.data.transcript)) {
+            realTranscript = conversationResponse.data.transcript.map((event: any) => {
+              const speaker = event.role === 'assistant' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
+              return `${speaker}: ${event.content}`;
+            }).join('\n\n');
+            
+            realAnswers = conversationResponse.data.transcript
+              .filter((event: any) => event.role !== 'assistant')
+              .map((event: any) => event.content)
+              .filter((content: string) => content && content.length > 20);
+            
+            dataSource = 'api_conversation';
+            
+            console.log('📄 Real transcript preview:', realTranscript.substring(0, 200) + '...');
+            console.log('✅ Extracted', realAnswers.length, 'real answers from transcript');
+          }
+          
+          // Fallback to events array
+          else if (conversationResponse.data.events && conversationResponse.data.events.length > 0) {
             realTranscript = conversationResponse.data.events.map((event: any) => {
               const speaker = event.role === 'assistant' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
               return `${speaker}: ${event.content}`;
@@ -769,7 +826,7 @@ export const endConversation = async (
       try {
         console.log('📊 Getting final conversation data...');
         const response = await axios.get(
-          `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+          `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`, // FIXED: Added verbose=true
           {
             headers: { 
               'x-api-key': TAVUS_API_KEY,

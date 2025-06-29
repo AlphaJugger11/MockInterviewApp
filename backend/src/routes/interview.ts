@@ -17,7 +17,7 @@ import { validateInterviewRequest, validateConversationRequest } from '../middle
 
 const router = express.Router();
 
-// FIXED: Configure multer with PROPER FILE TYPE DETECTION
+// FIXED: Configure multer with PROPER FILE TYPE DETECTION (Based on Supabase example)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -31,7 +31,7 @@ const upload = multer({
       size: file.size
     });
     
-    // CRITICAL FIX: Proper MIME type detection and validation
+    // CRITICAL FIX: Proper MIME type detection and validation (Based on Supabase example)
     const allowedMimeTypes = [
       'video/webm',
       'video/mp4',

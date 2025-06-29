@@ -34,7 +34,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // FIXED: Start recording function with PROPER MIME TYPE HANDLING
+  // FIXED: Start recording function with PROPER MIME TYPE HANDLING (Based on Supabase example)
   const startRecording = async () => {
     try {
       setError(null);
@@ -111,7 +111,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
       streamRef.current = combinedStream;
 
-      // STEP 4: FIXED MediaRecorder setup with PROPER MIME TYPE
+      // STEP 4: FIXED MediaRecorder setup with PROPER MIME TYPE (Based on Supabase example)
       let mimeType = '';
       
       // CRITICAL FIX: Test MIME types in order of preference
@@ -136,7 +136,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         throw new Error('Browser does not support video recording');
       }
 
-      // FIXED: MediaRecorder with proper MIME type
+      // FIXED: MediaRecorder with proper MIME type (Based on Supabase example)
       const mediaRecorder = new MediaRecorder(combinedStream, {
         mimeType: mimeType,
         videoBitsPerSecond: 500000,
@@ -177,7 +177,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       mediaRecorder.onstop = async () => {
         console.log('🛑 Recording stopped, processing with FIXED MIME TYPE...');
         
-        // CRITICAL FIX: Create blob with EXPLICIT MIME TYPE
+        // CRITICAL FIX: Create blob with EXPLICIT MIME TYPE (Based on Supabase example)
         const blob = new Blob(chunksRef.current, { 
           type: mimeType // FIXED: Use the actual MIME type, not undefined
         });
@@ -191,7 +191,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
           audioTracks: combinedStream.getAudioTracks().length
         });
         
-        // VALIDATION: Ensure blob has correct MIME type
+        // VALIDATION: Ensure blob has correct MIME type (Based on Supabase example)
         if (!blob.type || blob.type === 'text/plain' || blob.type === '') {
           console.error('❌ Blob has incorrect MIME type:', blob.type);
           console.log('🔧 Fixing blob MIME type...');
@@ -400,7 +400,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
     console.log('📝 Transcript updated:', transcript.length, 'events');
   };
 
-  // FIXED: Upload to Supabase with PROPER MIME TYPE
+  // FIXED: Upload to Supabase with PROPER MIME TYPE (Based on Supabase example)
   const uploadToSupabase = async (blob: Blob) => {
     setIsUploading(true);
     setUploadStatus('uploading');
@@ -415,8 +415,9 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
         userName
       });
       
-      // VALIDATION: Check MIME type before upload
-      if (!blob.type || blob.type === 'text/plain' || blob.type === '') {
+      // VALIDATION: Check MIME type before upload (Based on Supabase example)
+      const allowedMimeTypes = ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4'];
+      if (!blob.type || !allowedMimeTypes.includes(blob.type)) {
         console.error('❌ Invalid blob MIME type detected:', blob.type);
         throw new Error(`Invalid file type: ${blob.type}. Expected video/webm or video/mp4.`);
       }
@@ -525,7 +526,7 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
       <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start space-x-2">
         <Info className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
         <div className="text-blue-600 dark:text-blue-400 text-sm">
-          <p className="font-medium">FIXED: MIME Type Issue Resolved</p>
+          <p className="font-medium">FIXED: MIME Type Issue Resolved (Based on Supabase Example)</p>
           <p>Recording now uses proper video/webm MIME type instead of text/plain. Backend will accept the files correctly.</p>
         </div>
       </div>
@@ -690,9 +691,9 @@ const FullSessionRecorder: React.FC<FullSessionRecorderProps> = ({
 
       {/* Recording Info */}
       <div className="mt-4 text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
-        <p>• <strong>FIXED:</strong> Proper MIME type handling (video/webm instead of text/plain)</p>
+        <p>• <strong>FIXED:</strong> Proper MIME type handling (video/webm instead of text/plain) based on Supabase example</p>
         <p>• <strong>ENHANCED:</strong> System audio (AI voice) + Microphone audio capture</p>
-        <p>• <strong>WEBHOOK TRANSCRIPTION:</strong> Real conversation data from Tavus webhooks</p>
+        <p>• <strong>WEBHOOK TRANSCRIPTION:</strong> Real conversation data from Tavus webhooks with verbose mode</p>
         <p>• <strong>DETAILED LOGGING:</strong> Full transcript events logged to console for debugging</p>
         <p>• Recording optimized for Supabase 50MB limit with proper file validation</p>
         <p>• Backend now accepts files with correct MIME type detection</p>
