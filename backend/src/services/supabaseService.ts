@@ -15,83 +15,74 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   }
 });
 
-// Storage bucket name for interview recordings
+// Storage bucket names
 export const RECORDINGS_BUCKET = 'interview-recordings';
 export const TRANSCRIPTS_BUCKET = 'interview-transcripts';
+export const USER_TRANSCRIPTS_BUCKET = 'user-transcripts'; // Persistent user transcripts
 
 /**
- * Initialize storage buckets if they don't exist (FIXED for Supabase limits)
+ * Initialize storage buckets with proper Supabase limits
  */
 export const initializeStorageBuckets = async (): Promise<void> => {
   try {
-    // Check if recordings bucket exists
+    // Check if recordings bucket exists (temporary storage)
     const { data: recordingsBucket, error: recordingsError } = await supabase.storage.getBucket(RECORDINGS_BUCKET);
     
     if (recordingsError && recordingsError.message.includes('not found')) {
-      console.log('📦 Creating recordings bucket...');
+      console.log('📦 Creating recordings bucket (temporary storage)...');
       const { error: createRecordingsError } = await supabase.storage.createBucket(RECORDINGS_BUCKET, {
         public: false,
         allowedMimeTypes: ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4'],
-        fileSizeLimit: 1024 * 1024 * 50 // FIXED: 50MB limit (Supabase free tier maximum)
+        fileSizeLimit: 1024 * 1024 * 50 // 50MB limit (Supabase free tier maximum)
       });
       
       if (createRecordingsError) {
         console.error('❌ Error creating recordings bucket:', createRecordingsError);
-        
-        // Try without file size limit if it fails
-        console.log('🔄 Retrying bucket creation without file size limit...');
-        const { error: retryError } = await supabase.storage.createBucket(RECORDINGS_BUCKET, {
-          public: false,
-          allowedMimeTypes: ['video/webm', 'video/mp4', 'audio/webm', 'audio/mp4']
-        });
-        
-        if (retryError) {
-          console.error('❌ Error creating recordings bucket (retry):', retryError);
-        } else {
-          console.log('✅ Recordings bucket created successfully (without size limit)');
-        }
       } else {
-        console.log('✅ Recordings bucket created successfully');
+        console.log('✅ Recordings bucket created successfully (50MB limit)');
       }
     } else if (!recordingsError) {
       console.log('✅ Recordings bucket already exists');
-    } else {
-      console.error('❌ Error checking recordings bucket:', recordingsError);
     }
 
-    // Check if transcripts bucket exists
+    // Check if session transcripts bucket exists (temporary storage)
     const { data: transcriptsBucket, error: transcriptsError } = await supabase.storage.getBucket(TRANSCRIPTS_BUCKET);
     
     if (transcriptsError && transcriptsError.message.includes('not found')) {
-      console.log('📦 Creating transcripts bucket...');
+      console.log('📦 Creating session transcripts bucket (temporary storage)...');
       const { error: createTranscriptsError } = await supabase.storage.createBucket(TRANSCRIPTS_BUCKET, {
         public: false,
         allowedMimeTypes: ['text/plain', 'application/json'],
-        fileSizeLimit: 1024 * 1024 * 10 // 10MB limit for transcripts
+        fileSizeLimit: 1024 * 1024 * 5 // 5MB limit for transcripts
       });
       
       if (createTranscriptsError) {
-        console.error('❌ Error creating transcripts bucket:', createTranscriptsError);
-        
-        // Try without file size limit if it fails
-        console.log('🔄 Retrying transcripts bucket creation without file size limit...');
-        const { error: retryError } = await supabase.storage.createBucket(TRANSCRIPTS_BUCKET, {
-          public: false,
-          allowedMimeTypes: ['text/plain', 'application/json']
-        });
-        
-        if (retryError) {
-          console.error('❌ Error creating transcripts bucket (retry):', retryError);
-        } else {
-          console.log('✅ Transcripts bucket created successfully (without size limit)');
-        }
+        console.error('❌ Error creating session transcripts bucket:', createTranscriptsError);
       } else {
-        console.log('✅ Transcripts bucket created successfully');
+        console.log('✅ Session transcripts bucket created successfully');
       }
     } else if (!transcriptsError) {
-      console.log('✅ Transcripts bucket already exists');
-    } else {
-      console.error('❌ Error checking transcripts bucket:', transcriptsError);
+      console.log('✅ Session transcripts bucket already exists');
+    }
+
+    // Check if user transcripts bucket exists (persistent storage)
+    const { data: userTranscriptsBucket, error: userTranscriptsError } = await supabase.storage.getBucket(USER_TRANSCRIPTS_BUCKET);
+    
+    if (userTranscriptsError && userTranscriptsError.message.includes('not found')) {
+      console.log('📦 Creating user transcripts bucket (persistent storage)...');
+      const { error: createUserTranscriptsError } = await supabase.storage.createBucket(USER_TRANSCRIPTS_BUCKET, {
+        public: false,
+        allowedMimeTypes: ['text/plain', 'application/json'],
+        fileSizeLimit: 1024 * 1024 * 10 // 10MB limit for user transcripts
+      });
+      
+      if (createUserTranscriptsError) {
+        console.error('❌ Error creating user transcripts bucket:', createUserTranscriptsError);
+      } else {
+        console.log('✅ User transcripts bucket created successfully');
+      }
+    } else if (!userTranscriptsError) {
+      console.log('✅ User transcripts bucket already exists');
     }
 
   } catch (error) {
@@ -100,7 +91,7 @@ export const initializeStorageBuckets = async (): Promise<void> => {
 };
 
 /**
- * Upload recording file to Supabase Storage (FIXED for size limits)
+ * Upload recording file to Supabase Storage (temporary - deleted after session)
  */
 export const uploadRecording = async (
   conversationId: string,
@@ -129,7 +120,7 @@ export const uploadRecording = async (
     
     const fileName = `${conversationId}/${userName}-${Date.now()}.${extension}`;
     
-    console.log('📤 Uploading recording to Supabase:', {
+    console.log('📤 Uploading recording to Supabase (temporary):', {
       fileName,
       size: fileBuffer.length,
       sizeMB: Math.round(fileBuffer.length / 1024 / 1024),
@@ -153,7 +144,7 @@ export const uploadRecording = async (
       .from(RECORDINGS_BUCKET)
       .getPublicUrl(fileName);
 
-    console.log('✅ Recording uploaded successfully:', urlData.publicUrl);
+    console.log('✅ Recording uploaded successfully (temporary):', urlData.publicUrl);
     
     return { 
       success: true, 
@@ -170,7 +161,7 @@ export const uploadRecording = async (
 };
 
 /**
- * Upload transcript to Supabase Storage
+ * Upload transcript to session storage (temporary - deleted after session)
  */
 export const uploadTranscript = async (
   conversationId: string,
@@ -180,21 +171,18 @@ export const uploadTranscript = async (
   try {
     const fileName = `${conversationId}/${userName}-transcript-${Date.now()}.json`;
     
-    console.log('📤 Uploading transcript to Supabase:', fileName);
+    console.log('📤 Uploading transcript to session storage (temporary):', fileName);
     
     const transcriptData = {
       conversationId,
       userName,
       timestamp: new Date().toISOString(),
       events: transcript,
-      eventCount: transcript.length
+      eventCount: transcript.length,
+      storageType: 'session_temporary'
     };
     
     const transcriptString = JSON.stringify(transcriptData, null, 2);
-    
-    // Check transcript size (should be much smaller than recordings)
-    const transcriptSize = new Blob([transcriptString]).size;
-    console.log('📊 Transcript size:', transcriptSize, 'bytes');
     
     const { data, error } = await supabase.storage
       .from(TRANSCRIPTS_BUCKET)
@@ -213,7 +201,7 @@ export const uploadTranscript = async (
       .from(TRANSCRIPTS_BUCKET)
       .getPublicUrl(fileName);
 
-    console.log('✅ Transcript uploaded successfully:', urlData.publicUrl);
+    console.log('✅ Transcript uploaded successfully (temporary):', urlData.publicUrl);
     
     return { 
       success: true, 
@@ -222,6 +210,69 @@ export const uploadTranscript = async (
 
   } catch (error) {
     console.error('❌ Error in uploadTranscript:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    };
+  }
+};
+
+/**
+ * Upload transcript to user storage (persistent - kept after session)
+ */
+export const uploadUserTranscript = async (
+  userId: string,
+  conversationId: string,
+  userName: string,
+  transcript: any[],
+  jobTitle: string,
+  company?: string
+): Promise<{ success: boolean; url?: string; error?: string }> => {
+  try {
+    const fileName = `${userId}/${conversationId}-${Date.now()}.json`;
+    
+    console.log('📤 Uploading transcript to user storage (persistent):', fileName);
+    
+    const transcriptData = {
+      userId,
+      conversationId,
+      userName,
+      jobTitle,
+      company: company || null,
+      timestamp: new Date().toISOString(),
+      events: transcript,
+      eventCount: transcript.length,
+      storageType: 'user_persistent'
+    };
+    
+    const transcriptString = JSON.stringify(transcriptData, null, 2);
+    
+    const { data, error } = await supabase.storage
+      .from(USER_TRANSCRIPTS_BUCKET)
+      .upload(fileName, transcriptString, {
+        contentType: 'application/json',
+        upsert: false
+      });
+
+    if (error) {
+      console.error('❌ Error uploading user transcript:', error);
+      return { success: false, error: error.message };
+    }
+
+    // Get public URL for download
+    const { data: urlData } = supabase.storage
+      .from(USER_TRANSCRIPTS_BUCKET)
+      .getPublicUrl(fileName);
+
+    console.log('✅ User transcript uploaded successfully (persistent):', urlData.publicUrl);
+    
+    return { 
+      success: true, 
+      url: urlData.publicUrl 
+    };
+
+  } catch (error) {
+    console.error('❌ Error in uploadUserTranscript:', error);
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
@@ -259,7 +310,7 @@ export const getSignedDownloadUrl = async (
 };
 
 /**
- * List files for a conversation
+ * List files for a conversation (temporary storage)
  */
 export const listConversationFiles = async (
   conversationId: string
@@ -287,7 +338,28 @@ export const listConversationFiles = async (
 };
 
 /**
- * Delete recording files for a conversation
+ * List user transcripts (persistent storage)
+ */
+export const listUserTranscripts = async (
+  userId: string
+): Promise<{ transcripts: any[] }> => {
+  try {
+    const { data: transcripts, error: transcriptsError } = await supabase.storage
+      .from(USER_TRANSCRIPTS_BUCKET)
+      .list(userId);
+
+    return {
+      transcripts: transcripts || []
+    };
+
+  } catch (error) {
+    console.error('❌ Error listing user transcripts:', error);
+    return { transcripts: [] };
+  }
+};
+
+/**
+ * Delete recording files for a conversation (temporary storage cleanup)
  */
 export const deleteRecording = async (
   conversationId: string
@@ -333,9 +405,9 @@ export const deleteRecording = async (
 };
 
 /**
- * Delete transcript files for a conversation
+ * Delete session transcript files for a conversation (temporary storage cleanup)
  */
-export const deleteTranscript = async (
+export const deleteSessionTranscript = async (
   conversationId: string
 ): Promise<{ success: boolean; error?: string }> => {
   try {
@@ -345,12 +417,12 @@ export const deleteTranscript = async (
       .list(conversationId);
 
     if (listError) {
-      console.error('❌ Error listing transcript files:', listError);
+      console.error('❌ Error listing session transcript files:', listError);
       return { success: false, error: listError.message };
     }
 
     if (!files || files.length === 0) {
-      console.log('📁 No transcript files found for conversation:', conversationId);
+      console.log('📁 No session transcript files found for conversation:', conversationId);
       return { success: true };
     }
 
@@ -362,15 +434,71 @@ export const deleteTranscript = async (
       .remove(filePaths);
 
     if (deleteError) {
-      console.error('❌ Error deleting transcript files:', deleteError);
+      console.error('❌ Error deleting session transcript files:', deleteError);
       return { success: false, error: deleteError.message };
     }
 
-    console.log('✅ Transcript files deleted successfully for conversation:', conversationId);
+    console.log('✅ Session transcript files deleted successfully for conversation:', conversationId);
     return { success: true };
 
   } catch (error) {
-    console.error('❌ Error in deleteTranscript:', error);
+    console.error('❌ Error in deleteSessionTranscript:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    };
+  }
+};
+
+/**
+ * Session cleanup - delete recordings but preserve user transcript
+ */
+export const cleanupSession = async (
+  conversationId: string,
+  userId: string,
+  userName: string,
+  transcript: any[],
+  jobTitle: string,
+  company?: string
+): Promise<{ success: boolean; userTranscriptUrl?: string; error?: string }> => {
+  try {
+    console.log('🧹 Starting session cleanup for conversation:', conversationId);
+    
+    // Step 1: Save transcript to user storage (persistent)
+    let userTranscriptUrl: string | undefined;
+    if (transcript && transcript.length > 0) {
+      const userTranscriptResult = await uploadUserTranscript(
+        userId,
+        conversationId,
+        userName,
+        transcript,
+        jobTitle,
+        company
+      );
+      
+      if (userTranscriptResult.success) {
+        userTranscriptUrl = userTranscriptResult.url;
+        console.log('✅ User transcript saved to persistent storage');
+      } else {
+        console.warn('⚠️ Failed to save user transcript:', userTranscriptResult.error);
+      }
+    }
+    
+    // Step 2: Delete recordings (temporary storage)
+    await deleteRecording(conversationId);
+    
+    // Step 3: Delete session transcripts (temporary storage)
+    await deleteSessionTranscript(conversationId);
+    
+    console.log('✅ Session cleanup completed successfully');
+    
+    return { 
+      success: true, 
+      userTranscriptUrl 
+    };
+    
+  } catch (error) {
+    console.error('❌ Error in session cleanup:', error);
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 

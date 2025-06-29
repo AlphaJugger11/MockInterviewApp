@@ -1,7 +1,20 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { uploadRecording, uploadTranscript, getSignedDownloadUrl, listConversationFiles, RECORDINGS_BUCKET, TRANSCRIPTS_BUCKET, deleteRecording, deleteTranscript } from '../services/supabaseService';
+import { 
+  uploadRecording, 
+  uploadTranscript, 
+  uploadUserTranscript,
+  getSignedDownloadUrl, 
+  listConversationFiles, 
+  listUserTranscripts,
+  RECORDINGS_BUCKET, 
+  TRANSCRIPTS_BUCKET, 
+  USER_TRANSCRIPTS_BUCKET,
+  deleteRecording, 
+  deleteSessionTranscript,
+  cleanupSession
+} from '../services/supabaseService';
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
@@ -451,14 +464,14 @@ export const conversationCallback = async (
   }
 };
 
-// Enhanced function to end conversation and cleanup
+// Enhanced function to end conversation and cleanup with user session management
 export const endConversation = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { conversationId, dynamicPersonaId } = req.body;
+    const { conversationId, dynamicPersonaId, userId, userName, jobTitle, company } = req.body;
     
     const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
     
@@ -478,10 +491,12 @@ export const endConversation = async (
       return;
     }
 
-    console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId });
+    console.log("🛑 Ending conversation and cleaning up:", { conversationId, dynamicPersonaId, userId });
 
     // Step 1: Get conversation data including transcript before ending it
     let conversationData: any = {};
+    let finalTranscript: any[] = [];
+    
     try {
       const conversationDataResponse = await axios.get(
         `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
@@ -503,7 +518,14 @@ export const endConversation = async (
       
       if (storedTranscript) {
         conversationData.webhookTranscript = storedTranscript;
+        finalTranscript = Array.isArray(storedTranscript) ? storedTranscript : [];
         console.log('📝 Found webhook transcript data');
+      } else if (conversationData.transcript) {
+        finalTranscript = Array.isArray(conversationData.transcript) ? conversationData.transcript : [];
+        console.log('📝 Found API transcript data');
+      } else if (conversationData.events) {
+        finalTranscript = Array.isArray(conversationData.events) ? conversationData.events : [];
+        console.log('📝 Found events data');
       }
       
       if (storedRecording) {
@@ -565,22 +587,51 @@ export const endConversation = async (
       }
     }
 
-    // Step 4: Schedule Supabase cleanup after 1 minute
-    setTimeout(async () => {
-      console.log('🗑️ Cleaning up Supabase files for conversation:', conversationId);
-      try {
-        await deleteRecording(conversationId);
-        await deleteTranscript(conversationId);
-        console.log('✅ Supabase files cleaned up successfully');
-      } catch (cleanupError) {
-        console.error('❌ Error cleaning up Supabase files:', cleanupError);
+    // Step 4: Handle user session cleanup (recordings deleted, transcripts preserved)
+    let userTranscriptUrl: string | undefined;
+    
+    if (userId && finalTranscript.length > 0) {
+      console.log('💾 Performing user session cleanup...');
+      
+      const cleanupResult = await cleanupSession(
+        conversationId,
+        userId,
+        userName || 'User',
+        finalTranscript,
+        jobTitle || 'Unknown Position',
+        company
+      );
+      
+      if (cleanupResult.success) {
+        userTranscriptUrl = cleanupResult.userTranscriptUrl;
+        console.log('✅ User session cleanup completed successfully');
+      } else {
+        console.warn('⚠️ User session cleanup failed:', cleanupResult.error);
       }
-    }, 60000); // 1 minute delay
+    } else {
+      // Fallback: Just delete temporary files after 2 minutes
+      setTimeout(async () => {
+        console.log('🗑️ Cleaning up temporary Supabase files for conversation:', conversationId);
+        try {
+          await deleteRecording(conversationId);
+          await deleteSessionTranscript(conversationId);
+          console.log('✅ Temporary Supabase files cleaned up successfully');
+        } catch (cleanupError) {
+          console.error('❌ Error cleaning up temporary Supabase files:', cleanupError);
+        }
+      }, 120000); // 2 minute delay
+    }
     
     res.status(200).json({ 
       success: true,
-      message: 'Conversation and persona cleanup completed successfully',
-      conversationData: conversationData // Return the conversation data for frontend use
+      message: 'Conversation and session cleanup completed successfully',
+      conversationData: conversationData,
+      userTranscriptUrl: userTranscriptUrl,
+      cleanupInfo: {
+        recordingsDeleted: true,
+        transcriptPreserved: !!userTranscriptUrl,
+        temporaryFilesScheduledForDeletion: true
+      }
     });
 
   } catch (error) {
@@ -943,7 +994,7 @@ export const uploadRecordingFile = async (
       res.status(200).json({
         success: true,
         url: result.url,
-        message: 'Recording uploaded successfully to Supabase Storage'
+        message: 'Recording uploaded successfully to Supabase Storage (temporary)'
       });
     } else {
       res.status(500).json({
@@ -990,7 +1041,7 @@ export const uploadTranscriptFile = async (
       res.status(200).json({
         success: true,
         url: result.url,
-        message: 'Transcript uploaded successfully to Supabase Storage'
+        message: 'Transcript uploaded successfully to Supabase Storage (temporary)'
       });
     } else {
       res.status(500).json({
@@ -1052,7 +1103,7 @@ export const getDownloadUrls = async (
       success: true,
       recordings: recordingUrls,
       transcripts: transcriptUrls,
-      message: 'Download URLs generated successfully'
+      message: 'Download URLs generated successfully (temporary files)'
     });
     
   } catch (error) {
@@ -1064,7 +1115,53 @@ export const getDownloadUrls = async (
   }
 };
 
-// Delete recording files from Supabase
+// Get user transcripts (persistent storage)
+export const getUserTranscripts = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+      return;
+    }
+    
+    console.log('🔗 Getting user transcripts for user:', userId);
+    
+    const files = await listUserTranscripts(userId);
+    
+    const transcriptUrls: string[] = [];
+    
+    // Generate signed URLs for user transcripts
+    for (const transcript of files.transcripts) {
+      const result = await getSignedDownloadUrl(USER_TRANSCRIPTS_BUCKET, `${userId}/${transcript.name}`);
+      if (result.success && result.url) {
+        transcriptUrls.push(result.url);
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      transcripts: transcriptUrls,
+      message: 'User transcript URLs generated successfully (persistent files)'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in getUserTranscripts:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// Delete recording files from Supabase (temporary storage)
 export const deleteRecordingFile = async (
   req: Request,
   res: Response,
@@ -1088,7 +1185,7 @@ export const deleteRecordingFile = async (
     if (result.success) {
       res.status(200).json({
         success: true,
-        message: 'Recording files deleted successfully'
+        message: 'Recording files deleted successfully from temporary storage'
       });
     } else {
       res.status(500).json({

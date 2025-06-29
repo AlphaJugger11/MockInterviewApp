@@ -1,6 +1,18 @@
 import express from 'express';
 import multer from 'multer';
-import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback, getConversation, uploadRecordingFile, uploadTranscriptFile, getDownloadUrls, deleteRecordingFile } from '../controllers/interviewController';
+import { 
+  startInterview, 
+  createConversation, 
+  endConversation, 
+  analyzeInterview, 
+  conversationCallback, 
+  getConversation, 
+  uploadRecordingFile, 
+  uploadTranscriptFile, 
+  getDownloadUrls, 
+  getUserTranscripts,
+  deleteRecordingFile 
+} from '../controllers/interviewController';
 import { validateInterviewRequest, validateConversationRequest } from '../middleware/validation';
 
 const router = express.Router();
@@ -9,7 +21,7 @@ const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB limit
+    fileSize: 50 * 1024 * 1024, // 50MB limit (Supabase free tier maximum)
   },
   fileFilter: (req, file, cb) => {
     console.log('📁 File upload attempt:', {
@@ -41,7 +53,7 @@ router.post('/create-conversation', validateConversationRequest, createConversat
 // GET /api/interview/get-conversation/:conversationId - Get conversation data
 router.get('/get-conversation/:conversationId', getConversation);
 
-// POST /api/interview/end-conversation - Endpoint to terminate sessions
+// POST /api/interview/end-conversation - Endpoint to terminate sessions with user session management
 router.post('/end-conversation', endConversation);
 
 // POST /api/interview/analyze - Endpoint for AI-powered analysis with real data
@@ -50,16 +62,19 @@ router.post('/analyze', analyzeInterview);
 // POST /api/interview/conversation-callback - Webhook for conversation transcripts
 router.post('/conversation-callback', conversationCallback);
 
-// POST /api/interview/upload-recording - Upload recording to Supabase (FIXED)
+// POST /api/interview/upload-recording - Upload recording to Supabase (temporary storage)
 router.post('/upload-recording', upload.single('recording'), uploadRecordingFile);
 
-// POST /api/interview/upload-transcript - Upload transcript to Supabase
+// POST /api/interview/upload-transcript - Upload transcript to Supabase (temporary storage)
 router.post('/upload-transcript', uploadTranscriptFile);
 
-// GET /api/interview/download-urls/:conversationId - Get download URLs for files
+// GET /api/interview/download-urls/:conversationId - Get download URLs for temporary files
 router.get('/download-urls/:conversationId', getDownloadUrls);
 
-// DELETE /api/interview/delete-recording/:conversationId - Delete recording from Supabase
+// GET /api/interview/user-transcripts/:userId - Get user transcripts (persistent storage)
+router.get('/user-transcripts/:userId', getUserTranscripts);
+
+// DELETE /api/interview/delete-recording/:conversationId - Delete recording from Supabase (temporary storage)
 router.delete('/delete-recording/:conversationId', deleteRecordingFile);
 
 // POST /api/interview/start - Legacy endpoint
