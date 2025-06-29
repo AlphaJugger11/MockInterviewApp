@@ -21,7 +21,7 @@ export const TRANSCRIPTS_BUCKET = 'interview-transcripts';
 export const USER_TRANSCRIPTS_BUCKET = 'user-transcripts'; // Persistent user transcripts
 
 /**
- * Initialize storage buckets with proper Supabase limits
+ * Initialize storage buckets with proper Supabase limits (50MB max for free tier)
  */
 export const initializeStorageBuckets = async (): Promise<void> => {
   try {
