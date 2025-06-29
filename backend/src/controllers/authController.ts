@@ -1,9 +1,24 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../services/supabaseService';
-import bcrypt from 'bcrypt';
+import CryptoJS from 'crypto-js';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this-to-something-secure';
+const HASH_SECRET = process.env.HASH_SECRET || 'hash-secret-key-change-this';
+
+// Hash password using crypto-js (WebContainer compatible)
+const hashPassword = (password: string): string => {
+  return CryptoJS.PBKDF2(password, HASH_SECRET, {
+    keySize: 256/32,
+    iterations: 10000
+  }).toString();
+};
+
+// Verify password
+const verifyPassword = (password: string, hashedPassword: string): boolean => {
+  const hash = hashPassword(password);
+  return hash === hashedPassword;
+};
 
 // Register new user
 export const registerUser = async (
@@ -22,13 +37,38 @@ export const registerUser = async (
       return;
     }
 
+    // Validate input
+    if (email.length < 3 || !email.includes('@')) {
+      res.status(400).json({
+        success: false,
+        error: 'Please enter a valid email address'
+      });
+      return;
+    }
+
+    if (password.length < 6) {
+      res.status(400).json({
+        success: false,
+        error: 'Password must be at least 6 characters long'
+      });
+      return;
+    }
+
+    if (name.length < 2) {
+      res.status(400).json({
+        success: false,
+        error: 'Name must be at least 2 characters long'
+      });
+      return;
+    }
+
     console.log('👤 Registering new user:', { email, name });
 
     // Check if user already exists
     const { data: existingUser, error: checkError } = await supabase
       .from('users')
       .select('id')
-      .eq('email', email)
+      .eq('email', email.toLowerCase().trim())
       .single();
 
     if (existingUser) {
@@ -39,9 +79,8 @@ export const registerUser = async (
       return;
     }
 
-    // Hash password
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    // Hash password using crypto-js
+    const hashedPassword = hashPassword(password);
 
     // Insert user into database
     const { data: newUser, error: insertError } = await supabase
@@ -51,7 +90,8 @@ export const registerUser = async (
           email: email.toLowerCase().trim(),
           password_hash: hashedPassword,
           name: name.trim(),
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         }
       ])
       .select()
@@ -59,10 +99,18 @@ export const registerUser = async (
 
     if (insertError) {
       console.error('❌ Error creating user:', insertError);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to create user account'
-      });
+      
+      if (insertError.message.includes('duplicate key')) {
+        res.status(400).json({
+          success: false,
+          error: 'User with this email already exists'
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to create user account. Please try again.'
+        });
+      }
       return;
     }
 
@@ -90,7 +138,7 @@ export const registerUser = async (
     console.error('❌ Error in registerUser:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error. Please try again.'
     });
   }
 };
@@ -122,6 +170,7 @@ export const loginUser = async (
       .single();
 
     if (userError || !user) {
+      console.log('❌ User not found:', email);
       res.status(401).json({
         success: false,
         error: 'Invalid email or password'
@@ -129,10 +178,11 @@ export const loginUser = async (
       return;
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    // Verify password using crypto-js
+    const isPasswordValid = verifyPassword(password, user.password_hash);
     
     if (!isPasswordValid) {
+      console.log('❌ Invalid password for user:', email);
       res.status(401).json({
         success: false,
         error: 'Invalid email or password'
@@ -164,7 +214,7 @@ export const loginUser = async (
     console.error('❌ Error in loginUser:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error. Please try again.'
     });
   }
 };
@@ -196,6 +246,7 @@ export const verifyToken = async (
       .single();
 
     if (userError || !user) {
+      console.log('❌ Invalid token for user:', decoded.userId);
       res.status(401).json({
         success: false,
         error: 'Invalid token'
@@ -212,6 +263,33 @@ export const verifyToken = async (
     res.status(401).json({
       success: false,
       error: 'Invalid token'
+    });
+  }
+};
+
+// Get current user
+export const getCurrentUser = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in getCurrentUser:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
     });
   }
 };

@@ -1,5 +1,5 @@
 import express from 'express';
-import { registerUser, loginUser, verifyToken } from '../controllers/authController';
+import { registerUser, loginUser, verifyToken, getCurrentUser } from '../controllers/authController';
 
 const router = express.Router();
 
@@ -10,11 +10,9 @@ router.post('/register', registerUser);
 router.post('/login', loginUser);
 
 // GET /api/auth/verify - Verify token
-router.get('/verify', verifyToken, (req, res) => {
-  res.json({
-    success: true,
-    user: (req as any).user
-  });
-});
+router.get('/verify', verifyToken, getCurrentUser);
+
+// GET /api/auth/me - Get current user (protected route)
+router.get('/me', verifyToken, getCurrentUser);
 
 export default router;
