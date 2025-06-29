@@ -1,8 +1,24 @@
 import express from 'express';
-import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback, getConversation } from '../controllers/interviewController';
+import multer from 'multer';
+import { startInterview, createConversation, endConversation, analyzeInterview, conversationCallback, getConversation, uploadRecordingFile, uploadTranscriptFile, getDownloadUrls } from '../controllers/interviewController';
 import { validateInterviewRequest, validateConversationRequest } from '../middleware/validation';
 
 const router = express.Router();
+
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 500 * 1024 * 1024, // 500MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('video/') || file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video and audio files are allowed'));
+    }
+  }
+});
 
 // POST /api/interview/create-conversation - Enhanced dynamic persona endpoint
 router.post('/create-conversation', validateConversationRequest, createConversation);
@@ -18,6 +34,15 @@ router.post('/analyze', analyzeInterview);
 
 // POST /api/interview/conversation-callback - Webhook for conversation transcripts and recordings
 router.post('/conversation-callback', conversationCallback);
+
+// POST /api/interview/upload-recording - Upload recording to Supabase
+router.post('/upload-recording', upload.single('recording'), uploadRecordingFile);
+
+// POST /api/interview/upload-transcript - Upload transcript to Supabase
+router.post('/upload-transcript', uploadTranscriptFile);
+
+// GET /api/interview/download-urls/:conversationId - Get download URLs for files
+router.get('/download-urls/:conversationId', getDownloadUrls);
 
 // POST /api/interview/start - Legacy endpoint
 router.post('/start', validateInterviewRequest, startInterview);

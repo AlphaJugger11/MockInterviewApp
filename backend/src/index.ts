@@ -8,6 +8,7 @@ import compression from 'compression';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import interviewRoutes from './routes/interview';
+import { initializeStorageBuckets } from './services/supabaseService';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -55,7 +56,8 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
     port: PORT,
-    cors: 'enabled'
+    cors: 'enabled',
+    supabase: 'configured'
   });
 });
 
@@ -64,7 +66,8 @@ app.get('/api/test', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Backend is connected and working!',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    supabase: 'ready'
   });
 });
 
@@ -76,6 +79,18 @@ app.use(notFound);
 
 // Error handling middleware
 app.use(errorHandler);
+
+// Initialize Supabase Storage buckets
+const initializeSupabase = async () => {
+  try {
+    console.log('🔧 Initializing Supabase Storage buckets...');
+    await initializeStorageBuckets();
+    console.log('✅ Supabase Storage initialized successfully');
+  } catch (error) {
+    console.error('❌ Error initializing Supabase Storage:', error);
+    console.warn('⚠️ Server will continue without Supabase Storage');
+  }
+};
 
 // Graceful shutdown handling
 process.on('SIGTERM', () => {
@@ -89,7 +104,7 @@ process.on('SIGINT', () => {
 });
 
 // Start server
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Ascend AI Backend Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
@@ -98,6 +113,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   if (process.env.NODE_ENV !== 'production') {
     console.log(`🌐 CORS enabled for WebContainer URLs`);
   }
+  
+  // Initialize Supabase after server starts
+  await initializeSupabase();
 });
 
 // Handle server errors

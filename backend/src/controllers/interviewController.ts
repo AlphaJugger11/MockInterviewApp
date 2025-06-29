@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { uploadRecording, uploadTranscript, getSignedDownloadUrl, listConversationFiles, RECORDINGS_BUCKET, TRANSCRIPTS_BUCKET } from '../services/supabaseService';
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
@@ -109,7 +110,7 @@ export const createConversation = async (
       return;
     }
 
-    console.log("✅ Creating conversation with RECORDING ENABLED for:", { jobTitle, userName });
+    console.log("✅ Creating conversation with RECORDING AND TRANSCRIPTION ENABLED for:", { jobTitle, userName });
 
     // Step 1: Generate enhanced instructions using Gemini
     console.log("Generating enhanced instructions using Gemini API...");
@@ -962,6 +963,166 @@ Provide realistic scores based on the actual content. Be constructive and specif
       message: 'Interview analysis completed with enhanced personalized data',
       note: 'AI analysis used enhanced fallback data based on your session information',
       dataSource: 'fallback_personalized'
+    });
+  }
+};
+
+// NEW: Upload recording file to Supabase Storage
+export const uploadRecordingFile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { conversationId, userName } = req.body;
+    const file = req.file;
+    
+    if (!file) {
+      res.status(400).json({
+        success: false,
+        error: 'No recording file provided'
+      });
+      return;
+    }
+    
+    if (!conversationId || !userName) {
+      res.status(400).json({
+        success: false,
+        error: 'Conversation ID and user name are required'
+      });
+      return;
+    }
+    
+    console.log('📤 Uploading recording to Supabase:', {
+      conversationId,
+      userName,
+      fileSize: file.size,
+      mimeType: file.mimetype
+    });
+    
+    const result = await uploadRecording(conversationId, userName, file.buffer, file.mimetype);
+    
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        url: result.url,
+        message: 'Recording uploaded successfully to Supabase Storage'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error || 'Failed to upload recording'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in uploadRecordingFile:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// NEW: Upload transcript to Supabase Storage
+export const uploadTranscriptFile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { conversationId, userName, transcript } = req.body;
+    
+    if (!conversationId || !userName || !transcript) {
+      res.status(400).json({
+        success: false,
+        error: 'Conversation ID, user name, and transcript are required'
+      });
+      return;
+    }
+    
+    console.log('📤 Uploading transcript to Supabase:', {
+      conversationId,
+      userName,
+      transcriptLength: Array.isArray(transcript) ? transcript.length : 'string'
+    });
+    
+    const result = await uploadTranscript(conversationId, userName, transcript);
+    
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        url: result.url,
+        message: 'Transcript uploaded successfully to Supabase Storage'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error || 'Failed to upload transcript'
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in uploadTranscriptFile:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// NEW: Get download URLs for conversation files
+export const getDownloadUrls = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { conversationId } = req.params;
+    
+    if (!conversationId) {
+      res.status(400).json({
+        success: false,
+        error: 'Conversation ID is required'
+      });
+      return;
+    }
+    
+    console.log('🔗 Getting download URLs for conversation:', conversationId);
+    
+    const files = await listConversationFiles(conversationId);
+    
+    const recordingUrls: string[] = [];
+    const transcriptUrls: string[] = [];
+    
+    // Generate signed URLs for recordings
+    for (const recording of files.recordings) {
+      const result = await getSignedDownloadUrl(RECORDINGS_BUCKET, `${conversationId}/${recording.name}`);
+      if (result.success && result.url) {
+        recordingUrls.push(result.url);
+      }
+    }
+    
+    // Generate signed URLs for transcripts
+    for (const transcript of files.transcripts) {
+      const result = await getSignedDownloadUrl(TRANSCRIPTS_BUCKET, `${conversationId}/${transcript.name}`);
+      if (result.success && result.url) {
+        transcriptUrls.push(result.url);
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      recordings: recordingUrls,
+      transcripts: transcriptUrls,
+      message: 'Download URLs generated successfully'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in getDownloadUrls:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
     });
   }
 };
