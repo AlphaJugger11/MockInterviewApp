@@ -15,6 +15,7 @@ const Interview = () => {
   const [isEnding, setIsEnding] = useState(false);
   const [capturedTranscript, setCapturedTranscript] = useState<any[]>([]);
   const [recordingData, setRecordingData] = useState<any>(null);
+  const [webhookStatus, setWebhookStatus] = useState<'pending' | 'active' | 'received'>('pending');
 
   // Session tracking refs
   const sessionStartTimeRef = useRef<number>(Date.now());
@@ -36,7 +37,7 @@ const Interview = () => {
       setUserName(name);
       setIsRecording(true);
       sessionStartTimeRef.current = Date.now();
-      console.log('✅ Interview session started:', { url, id, personaId, name });
+      console.log('✅ Interview session started with WEBHOOK TRANSCRIPTION:', { url, id, personaId, name });
     } else {
       console.error("❌ No conversation data found. Navigating back to setup.");
       setError("No interview session found. Please set up a new interview.");
@@ -54,7 +55,7 @@ const Interview = () => {
     return () => clearInterval(timer);
   }, [navigate, isEnding]);
 
-  // Enhanced transcript capture with webhook data
+  // ENHANCED: Transcript capture with WEBHOOK PRIORITY and better error handling
   useEffect(() => {
     const captureTranscript = async () => {
       if (!conversationId || isEnding) return;
@@ -67,32 +68,42 @@ const Interview = () => {
         
         if (response.ok) {
           const data = await response.json();
+          
+          // Check if we have webhook data
+          if (data.hasWebhookData) {
+            setWebhookStatus('received');
+            console.log('✅ WEBHOOK transcript data received:', data.transcriptEvents?.length || 0, 'events');
+          } else if (data.dataSource === 'api_fallback') {
+            setWebhookStatus('active');
+            console.log('📡 Using API fallback transcript data:', data.transcriptEvents?.length || 0, 'events');
+          } else {
+            setWebhookStatus('pending');
+            console.log('⏳ Waiting for webhook transcript data...');
+          }
+          
           if (data.transcriptEvents && data.transcriptEvents.length > 0) {
             setCapturedTranscript(data.transcriptEvents);
             
             // Store transcript in localStorage immediately
             localStorage.setItem(`live_transcript_${conversationId}`, JSON.stringify(data.transcriptEvents));
-            console.log('📝 Live transcript updated from webhook:', data.transcriptEvents.length, 'events');
-            
-            // Check if this is webhook data
-            if (data.hasWebhookData) {
-              console.log('✅ Using REAL webhook transcript data');
-            }
+            console.log('📝 Live transcript updated:', data.transcriptEvents.length, 'events');
           }
+        } else {
+          console.warn('⚠️ Error response from transcript API:', response.status);
         }
       } catch (error) {
-        console.warn('⚠️ Error capturing live transcript:', error);
+        console.warn('⚠️ Error capturing live transcript (expected during timeouts):', error instanceof Error ? error.message : 'Unknown error');
       }
     };
 
-    // Start transcript capture interval every 5 seconds
+    // Start transcript capture interval every 3 seconds (faster for better UX)
     if (conversationId && !transcriptIntervalRef.current && !isEnding) {
       // Initial capture
       captureTranscript();
       
       // Set up interval
-      transcriptIntervalRef.current = setInterval(captureTranscript, 5000); // Every 5 seconds
-      console.log('📝 Started live transcript capture every 5 seconds');
+      transcriptIntervalRef.current = setInterval(captureTranscript, 3000); // Every 3 seconds
+      console.log('📝 Started ENHANCED transcript capture every 3 seconds with webhook priority');
     }
 
     return () => {
@@ -115,11 +126,11 @@ const Interview = () => {
     console.log('📝 Transcript updated:', transcript.length, 'events');
   };
 
-  // Enhanced session cleanup with user data
+  // ENHANCED: Session cleanup with WEBHOOK TRANSCRIPT PRIORITY
   const handleEndSession = async () => {
     if (isEnding || endingInProgressRef.current) return;
     
-    console.log('🛑 Ending interview session with enhanced cleanup...');
+    console.log('🛑 Ending interview session with ENHANCED WEBHOOK CLEANUP...');
     setIsEnding(true);
     endingInProgressRef.current = true;
     
@@ -129,32 +140,53 @@ const Interview = () => {
       const jobTitle = localStorage.getItem('jobTitle');
       const company = localStorage.getItem('company');
       
-      // Store final session data
+      // PRIORITY: Use the latest captured transcript (which prioritizes webhook data)
+      let finalTranscript = capturedTranscript;
+      
+      // Try to get the most recent transcript one more time
+      if (conversationId) {
+        try {
+          const response = await fetch(`http://localhost:3001/api/interview/get-conversation/${conversationId}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.transcriptEvents && data.transcriptEvents.length > finalTranscript.length) {
+              finalTranscript = data.transcriptEvents;
+              console.log('📝 Updated to latest transcript before ending:', finalTranscript.length, 'events');
+            }
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not get final transcript update:', error);
+        }
+      }
+      
+      // Store final session data with WEBHOOK PRIORITY
       const finalSessionData = {
         conversationId,
-        transcript: capturedTranscript,
+        transcript: finalTranscript,
         duration: sessionDuration,
         endTime: new Date().toISOString(),
         userName,
         jobTitle,
         company,
         recordingData: recordingData,
-        transcriptLength: capturedTranscript.length,
-        userId: userId
+        transcriptLength: finalTranscript.length,
+        userId: userId,
+        webhookStatus: webhookStatus,
+        dataSource: webhookStatus === 'received' ? 'webhook' : webhookStatus === 'active' ? 'api_fallback' : 'pending'
       };
       
       localStorage.setItem(`session_${conversationId}`, JSON.stringify(finalSessionData));
-      localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(capturedTranscript));
+      localStorage.setItem(`transcript_${conversationId}`, JSON.stringify(finalTranscript));
       localStorage.setItem('sessionCompleted', 'true');
       localStorage.setItem('sessionEndTime', new Date().toISOString());
       localStorage.setItem('sessionDuration', sessionDuration.toString());
       
-      console.log('💾 Final session data stored');
+      console.log('💾 Final session data stored with webhook priority');
 
-      // End conversation on backend with user data for persistent storage
+      // End conversation on backend with ENHANCED USER DATA for persistent storage
       if (conversationId) {
         try {
-          console.log('🛑 Ending conversation on backend with user data...');
+          console.log('🛑 Ending conversation on backend with enhanced user data...');
           const response = await fetch('http://localhost:3001/api/interview/end-conversation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -170,12 +202,19 @@ const Interview = () => {
           
           if (response.ok) {
             const data = await response.json();
-            console.log('✅ Conversation ended successfully on backend');
+            console.log('✅ Conversation ended successfully with enhanced cleanup');
             
             // Store user transcript URL if available
             if (data.conversationData?.userTranscriptUrl) {
               localStorage.setItem(`user_transcript_${conversationId}`, data.conversationData.userTranscriptUrl);
               console.log('💾 User transcript URL stored for persistent access');
+            }
+            
+            // Log final webhook status
+            if (data.conversationData?.webhookDataUsed) {
+              console.log('✅ Session ended using WEBHOOK transcript data');
+            } else {
+              console.log('⚠️ Session ended without webhook data');
             }
           }
         } catch (endError) {
@@ -201,6 +240,24 @@ const Interview = () => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getWebhookStatusColor = () => {
+    switch (webhookStatus) {
+      case 'received': return 'text-green-500';
+      case 'active': return 'text-blue-500';
+      case 'pending': return 'text-yellow-500';
+      default: return 'text-gray-500';
+    }
+  };
+
+  const getWebhookStatusText = () => {
+    switch (webhookStatus) {
+      case 'received': return 'Webhook Data Received';
+      case 'active': return 'API Fallback Active';
+      case 'pending': return 'Waiting for Webhook';
+      default: return 'Unknown Status';
+    }
   };
 
   if (error) {
@@ -234,11 +291,11 @@ const Interview = () => {
             <div className="flex items-center space-x-4">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
               <span className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-                Live Interview Session - Webhook Transcription Active
+                Live Interview Session - Enhanced Webhook Transcription
               </span>
               {isRecording && !isEnding && (
                 <span className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                  Duration: {formatDuration(sessionDuration)} • Transcript: {capturedTranscript.length} events
+                  Duration: {formatDuration(sessionDuration)} • Transcript: {capturedTranscript.length} events • Status: {getWebhookStatusText()}
                 </span>
               )}
             </div>
@@ -281,9 +338,17 @@ const Interview = () => {
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                     <span>Tavus Cloud Interview</span>
                   </div>
-                  <div className="inline-flex items-center space-x-2 bg-purple-500/10 text-purple-600 dark:text-purple-400 px-3 py-1 rounded-full text-sm">
-                    <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
-                    <span>Webhook Transcription</span>
+                  <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-sm ${
+                    webhookStatus === 'received' ? 'bg-green-500/10 text-green-600 dark:text-green-400' :
+                    webhookStatus === 'active' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+                    'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400'
+                  }`}>
+                    <div className={`w-2 h-2 rounded-full animate-pulse ${
+                      webhookStatus === 'received' ? 'bg-green-500' :
+                      webhookStatus === 'active' ? 'bg-blue-500' :
+                      'bg-yellow-500'
+                    }`}></div>
+                    <span>{getWebhookStatusText()}</span>
                   </div>
                   <div className="inline-flex items-center space-x-2 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-full text-sm">
                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
@@ -315,7 +380,7 @@ const Interview = () => {
         {/* Session Info */}
         <div className="mt-6 bg-light-secondary dark:bg-dark-secondary rounded-2xl p-6 border border-light-border dark:border-dark-border">
           <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-4">
-            Session Information
+            Enhanced Session Information
           </h3>
           <div className="grid md:grid-cols-3 gap-4 text-sm">
             <div className="flex justify-between">
@@ -331,9 +396,9 @@ const Interview = () => {
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-light-text-secondary dark:text-dark-text-secondary">Transcription:</span>
-              <span className="text-purple-500 font-medium">
-                Webhook Active
+              <span className="text-light-text-secondary dark:text-dark-text-secondary">Webhook Status:</span>
+              <span className={`font-medium ${getWebhookStatusColor()}`}>
+                {getWebhookStatusText()}
               </span>
             </div>
             <div className="flex justify-between">
@@ -356,20 +421,30 @@ const Interview = () => {
             </div>
           </div>
 
-          {/* Webhook Transcription Info */}
+          {/* Enhanced Webhook Transcription Info */}
           <div className="mt-4 p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
             <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
-              Enhanced Transcription System
+              Enhanced Webhook Transcription System
             </h4>
             <ul className="text-xs text-light-text-secondary dark:text-dark-text-secondary space-y-1">
-              <li>• Webhook transcription captures REAL conversation data from Tavus</li>
-              <li>• Transcript events captured in real-time every 5 seconds</li>
-              <li>• Client-side recording provides backup video with enhanced audio</li>
-              <li>• Automatic upload to Supabase Storage for cloud backup</li>
-              <li>• Persistent user transcript storage for long-term access</li>
-              <li>• AI analysis uses REAL conversation data for accurate feedback</li>
-              <li>• Session cleanup preserves user data while removing temporary files</li>
-              <li>• Enhanced audio capture ensures both AI voice and user voice are recorded</li>
+              <li>• <strong>WEBHOOK PRIORITY:</strong> Real conversation data captured directly from Tavus webhooks</li>
+              <li>• <strong>API FALLBACK:</strong> Short timeout API calls as backup when webhook data is delayed</li>
+              <li>• <strong>TIMEOUT HANDLING:</strong> Reduced API timeouts (3-5 seconds) to prevent blocking</li>
+              <li>• <strong>REAL-TIME CAPTURE:</strong> Transcript events captured every 3 seconds during conversation</li>
+              <li>• <strong>PERSISTENT STORAGE:</strong> User transcripts saved to Supabase for long-term access</li>
+              <li>• <strong>ENHANCED CLEANUP:</strong> Temporary files removed while preserving user data</li>
+              <li>• <strong>AI ANALYSIS:</strong> Uses REAL webhook conversation data for accurate feedback</li>
+              <li>• <strong>CLIENT RECORDING:</strong> Enhanced audio capture with system audio + microphone</li>
+              <li>• Current Status: <span className={getWebhookStatusColor()}>{getWebhookStatusText()}</span></li>
+              {webhookStatus === 'received' && (
+                <li className="text-green-600 dark:text-green-400">• ✅ WEBHOOK DATA ACTIVE - Using real conversation transcript</li>
+              )}
+              {webhookStatus === 'active' && (
+                <li className="text-blue-600 dark:text-blue-400">• 📡 API FALLBACK ACTIVE - Using API transcript data</li>
+              )}
+              {webhookStatus === 'pending' && (
+                <li className="text-yellow-600 dark:text-yellow-400">• ⏳ WAITING FOR WEBHOOK - Transcript data pending</li>
+              )}
             </ul>
           </div>
         </div>
