@@ -32,24 +32,47 @@ const Auth = () => {
         body: JSON.stringify(payload)
       });
 
-      const data = await response.json();
+      console.log('📡 Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Response error:', errorText);
+        
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        
+        throw new Error(errorData.error || 'Authentication failed');
+      }
 
-      if (response.ok && data.success) {
+      const data = await response.json();
+      console.log('✅ Authentication response:', data);
+
+      if (data.success && data.token && data.user) {
         // Store user data and token
         localStorage.setItem('authToken', data.token);
         localStorage.setItem('userId', data.user.id);
         localStorage.setItem('userEmail', data.user.email);
         localStorage.setItem('userName', data.user.name);
         
-        console.log('✅ Authentication successful:', data.user);
-        navigate('/dashboard');
+        console.log('✅ Authentication successful, stored data:', {
+          token: data.token.substring(0, 20) + '...',
+          userId: data.user.id,
+          userEmail: data.user.email,
+          userName: data.user.name
+        });
+        
+        // Force page reload to trigger authentication check
+        window.location.href = '/dashboard';
       } else {
-        setError(data.error || 'Authentication failed');
-        console.error('❌ Authentication failed:', data.error);
+        throw new Error(data.error || 'Authentication failed - invalid response format');
       }
     } catch (err) {
       console.error('❌ Authentication error:', err);
-      setError('Network error. Please check if the backend server is running.');
+      setError(err instanceof Error ? err.message : 'Network error. Please check if the backend server is running.');
     } finally {
       setLoading(false);
     }

@@ -29,6 +29,8 @@ export const registerUser = async (
   try {
     const { email, password, name } = req.body;
     
+    console.log('👤 Registration attempt:', { email, name, hasPassword: !!password });
+    
     if (!email || !password || !name) {
       res.status(400).json({
         success: false,
@@ -72,6 +74,7 @@ export const registerUser = async (
       .single();
 
     if (existingUser) {
+      console.log('❌ User already exists:', email);
       res.status(400).json({
         success: false,
         error: 'User with this email already exists'
@@ -81,6 +84,7 @@ export const registerUser = async (
 
     // Hash password using crypto-js
     const hashedPassword = hashPassword(password);
+    console.log('🔐 Password hashed successfully');
 
     // Insert user into database
     const { data: newUser, error: insertError } = await supabase
@@ -100,7 +104,7 @@ export const registerUser = async (
     if (insertError) {
       console.error('❌ Error creating user:', insertError);
       
-      if (insertError.message.includes('duplicate key')) {
+      if (insertError.message.includes('duplicate key') || insertError.message.includes('unique')) {
         res.status(400).json({
           success: false,
           error: 'User with this email already exists'
@@ -121,7 +125,7 @@ export const registerUser = async (
       { expiresIn: '7d' }
     );
 
-    console.log('✅ User registered successfully:', newUser.id);
+    console.log('✅ User registered successfully:', { id: newUser.id, email: newUser.email });
 
     res.status(201).json({
       success: true,
@@ -152,6 +156,8 @@ export const loginUser = async (
   try {
     const { email, password } = req.body;
     
+    console.log('🔐 Login attempt:', { email, hasPassword: !!password });
+    
     if (!email || !password) {
       res.status(400).json({
         success: false,
@@ -170,13 +176,15 @@ export const loginUser = async (
       .single();
 
     if (userError || !user) {
-      console.log('❌ User not found:', email);
+      console.log('❌ User not found:', email, userError?.message);
       res.status(401).json({
         success: false,
         error: 'Invalid email or password'
       });
       return;
     }
+
+    console.log('👤 User found:', { id: user.id, email: user.email });
 
     // Verify password using crypto-js
     const isPasswordValid = verifyPassword(password, user.password_hash);
@@ -197,7 +205,7 @@ export const loginUser = async (
       { expiresIn: '7d' }
     );
 
-    console.log('✅ User logged in successfully:', user.id);
+    console.log('✅ User logged in successfully:', { id: user.id, email: user.email });
 
     res.status(200).json({
       success: true,
@@ -226,7 +234,10 @@ export const verifyToken = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace('Bearer ', '');
+    
+    console.log('🔍 Token verification attempt:', { hasAuthHeader: !!authHeader, hasToken: !!token });
     
     if (!token) {
       res.status(401).json({
@@ -237,6 +248,7 @@ export const verifyToken = async (
     }
 
     const decoded = jwt.verify(token, JWT_SECRET) as any;
+    console.log('🔓 Token decoded:', { userId: decoded.userId, email: decoded.email });
     
     // Get user from database
     const { data: user, error: userError } = await supabase
@@ -246,13 +258,15 @@ export const verifyToken = async (
       .single();
 
     if (userError || !user) {
-      console.log('❌ Invalid token for user:', decoded.userId);
+      console.log('❌ Invalid token for user:', decoded.userId, userError?.message);
       res.status(401).json({
         success: false,
         error: 'Invalid token'
       });
       return;
     }
+
+    console.log('✅ Token verified successfully:', { id: user.id, email: user.email });
 
     // Add user to request object
     (req as any).user = user;
@@ -275,6 +289,8 @@ export const getCurrentUser = async (
 ): Promise<void> => {
   try {
     const user = (req as any).user;
+    
+    console.log('👤 Getting current user:', { id: user.id, email: user.email });
     
     res.status(200).json({
       success: true,

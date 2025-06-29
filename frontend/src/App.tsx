@@ -12,48 +12,74 @@ import Settings from './pages/Settings';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user is authenticated
-    const token = localStorage.getItem('authToken');
-    const userId = localStorage.getItem('userId');
-    
-    if (token && userId) {
-      // Verify token with backend
-      fetch('http://localhost:3001/api/auth/verify', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.success) {
-          setIsAuthenticated(true);
+    const checkAuthentication = async () => {
+      try {
+        // Check if user is authenticated
+        const token = localStorage.getItem('authToken');
+        const userId = localStorage.getItem('userId');
+        
+        console.log('🔍 Checking authentication:', { hasToken: !!token, hasUserId: !!userId });
+        
+        if (token && userId) {
+          // Verify token with backend
+          const response = await fetch('http://localhost:3001/api/auth/verify', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          console.log('📡 Token verification response:', response.status);
+          
+          if (response.ok) {
+            const data = await response.json();
+            console.log('✅ Token verification successful:', data);
+            
+            if (data.success && data.user) {
+              // Update localStorage with fresh user data
+              localStorage.setItem('userId', data.user.id);
+              localStorage.setItem('userEmail', data.user.email);
+              localStorage.setItem('userName', data.user.name);
+              
+              setIsAuthenticated(true);
+              console.log('✅ User authenticated successfully');
+            } else {
+              throw new Error('Invalid token response');
+            }
+          } else {
+            throw new Error(`Token verification failed: ${response.status}`);
+          }
         } else {
-          // Clear invalid token
-          localStorage.removeItem('authToken');
-          localStorage.removeItem('userId');
-          localStorage.removeItem('userEmail');
-          localStorage.removeItem('userName');
+          console.log('❌ No token or userId found');
           setIsAuthenticated(false);
         }
-      })
-      .catch(() => {
-        // Network error or backend down
+      } catch (error) {
+        console.error('❌ Authentication check failed:', error);
+        
+        // Clear invalid token data
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('userEmail');
+        localStorage.removeItem('userName');
+        
         setIsAuthenticated(false);
-      });
-    } else {
-      setIsAuthenticated(false);
-    }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkAuthentication();
   }, []);
 
   // Show loading while checking authentication
-  if (isAuthenticated === null) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-light-primary dark:bg-dark-primary flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-4 border-light-accent dark:border-dark-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-light-text-secondary dark:text-dark-text-secondary">Loading...</p>
+          <p className="text-light-text-secondary dark:text-dark-text-secondary">Checking authentication...</p>
         </div>
       </div>
     );
