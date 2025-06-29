@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Sun, Moon, Brain } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -10,7 +10,19 @@ interface NavbarProps {
 const Navbar: React.FC<NavbarProps> = ({ isPublic = false }) => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
   const isAuthPage = location.pathname === '/auth';
+
+  // Handle navigation to auth page
+  const handleLogin = () => {
+    console.log('🔐 Login clicked from navbar - navigating to auth');
+    navigate('/auth');
+  };
+
+  const handleSignUp = () => {
+    console.log('📝 Sign Up clicked from navbar - navigating to auth');
+    navigate('/auth');
+  };
 
   return (
     <nav className="bg-light-secondary dark:bg-dark-secondary border-b border-light-border dark:border-dark-border">
@@ -37,18 +49,18 @@ const Navbar: React.FC<NavbarProps> = ({ isPublic = false }) => {
                 <div className="flex items-center space-x-4">
                   {!isAuthPage && (
                     <>
-                      <Link
-                        to="/auth"
-                        className="text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text-primary dark:hover:text-dark-text-primary transition-colors"
+                      <button
+                        onClick={handleLogin}
+                        className="text-light-text-secondary dark:text-dark-text-secondary hover:text-light-text-primary dark:hover:text-dark-text-primary transition-colors cursor-pointer"
                       >
                         Login
-                      </Link>
-                      <Link
-                        to="/auth"
-                        className="bg-light-accent dark:bg-dark-accent text-white px-4 py-2 rounded-lg font-medium hover:opacity-90 transition-opacity"
+                      </button>
+                      <button
+                        onClick={handleSignUp}
+                        className="bg-light-accent dark:bg-dark-accent text-white px-4 py-2 rounded-lg font-medium hover:opacity-90 transition-opacity cursor-pointer"
                       >
                         Sign Up
-                      </Link>
+                      </button>
                     </>
                   )}
                 </div>

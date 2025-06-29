@@ -1,15 +1,33 @@
 import React, { useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCircle, Star, Brain, Target, TrendingUp } from 'lucide-react';
 import Layout from '../components/Layout';
 import { testimonials } from '../data/mockData';
 
 const Landing = () => {
+  const navigate = useNavigate();
+
   // Mark that user has visited the landing page
   useEffect(() => {
     localStorage.setItem('visitedLanding', 'true');
     console.log('✅ Landing page visited, marked in localStorage');
   }, []);
+
+  // Handle navigation to auth page
+  const handleStartForFree = () => {
+    console.log('🚀 Start for Free clicked - navigating to auth');
+    navigate('/auth');
+  };
+
+  const handleLogin = () => {
+    console.log('🔐 Login clicked - navigating to auth');
+    navigate('/auth');
+  };
+
+  const handleSignUp = () => {
+    console.log('📝 Sign Up clicked - navigating to auth');
+    navigate('/auth');
+  };
 
   const features = [
     {
@@ -43,14 +61,17 @@ const Landing = () => {
               Practice with AI-powered mock interviews, get real-time feedback, and land your dream job with confidence.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                to="/auth"
-                className="inline-flex items-center px-8 py-4 bg-light-accent dark:bg-dark-accent text-white font-semibold rounded-lg hover:opacity-90 transition-opacity"
+              <button
+                onClick={handleStartForFree}
+                className="inline-flex items-center px-8 py-4 bg-light-accent dark:bg-dark-accent text-white font-semibold rounded-lg hover:opacity-90 transition-opacity cursor-pointer"
               >
                 Start for Free
                 <ArrowRight className="ml-2 h-5 w-5" />
-              </Link>
-              <button className="inline-flex items-center px-8 py-4 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary font-semibold rounded-lg hover:bg-light-secondary dark:hover:bg-dark-secondary transition-colors">
+              </button>
+              <button 
+                onClick={() => console.log('Watch Demo clicked')}
+                className="inline-flex items-center px-8 py-4 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary font-semibold rounded-lg hover:bg-light-secondary dark:hover:bg-dark-secondary transition-colors cursor-pointer"
+              >
                 Watch Demo
               </button>
             </div>
@@ -177,12 +198,12 @@ const Landing = () => {
                   <span className="font-inter text-light-text-primary dark:text-dark-text-primary">Standard questions</span>
                 </li>
               </ul>
-              <Link
-                to="/auth"
-                className="w-full inline-flex items-center justify-center px-6 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary font-semibold rounded-lg hover:bg-light-secondary dark:hover:bg-dark-secondary transition-colors"
+              <button
+                onClick={handleStartForFree}
+                className="w-full inline-flex items-center justify-center px-6 py-3 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary font-semibold rounded-lg hover:bg-light-secondary dark:hover:bg-dark-secondary transition-colors cursor-pointer"
               >
                 Get Started
-              </Link>
+              </button>
             </div>
 
             <div className="bg-light-primary dark:bg-dark-primary p-8 rounded-2xl border-2 border-light-accent dark:border-dark-accent relative">
@@ -223,12 +244,12 @@ const Landing = () => {
                   <span className="font-inter text-light-text-primary dark:text-dark-text-primary">Performance analytics</span>
                 </li>
               </ul>
-              <Link
-                to="/auth"
-                className="w-full inline-flex items-center justify-center px-6 py-3 bg-light-accent dark:bg-dark-accent text-white font-semibold rounded-lg hover:opacity-90 transition-opacity"
+              <button
+                onClick={handleStartForFree}
+                className="w-full inline-flex items-center justify-center px-6 py-3 bg-light-accent dark:bg-dark-accent text-white font-semibold rounded-lg hover:opacity-90 transition-opacity cursor-pointer"
               >
                 Start Free Trial
-              </Link>
+              </button>
             </div>
           </div>
         </div>
