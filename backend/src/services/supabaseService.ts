@@ -21,6 +21,65 @@ export const TRANSCRIPTS_BUCKET = 'interview-transcripts';
 export const USER_TRANSCRIPTS_BUCKET = 'user-transcripts'; // Persistent user transcripts
 
 /**
+ * Initialize user table for authentication
+ */
+export const initializeUserTable = async (): Promise<void> => {
+  try {
+    console.log('👤 Initializing users table...');
+    
+    // Create users table if it doesn't exist
+    const { error } = await supabase.rpc('create_users_table', {});
+    
+    if (error && !error.message.includes('already exists')) {
+      // If RPC doesn't exist, create table directly
+      const { error: createError } = await supa base
+        .from('users')
+        .select('id')
+        .limit(1);
+      
+      if (createError && createError.message.includes('does not exist')) {
+        console.log('📦 Creating users table...');
+        
+        // Create the table using raw SQL
+        const createTableQuery = `
+          CREATE TABLE IF NOT EXISTS users (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          
+          -- Enable RLS
+          ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+          
+          -- Create policies
+          CREATE POLICY "Users can read own data" ON users
+            FOR SELECT USING (auth.uid() = id);
+            
+          CREATE POLICY "Users can update own data" ON users
+            FOR UPDATE USING (auth.uid() = id);
+        `;
+        
+        // Note: In a real implementation, you'd run this SQL directly in Supabase dashboard
+        console.log('📝 Users table SQL ready. Please run this in your Supabase SQL editor:');
+        console.log(createTableQuery);
+        console.log('✅ Users table initialization completed (manual setup required)');
+      } else {
+        console.log('✅ Users table already exists');
+      }
+    } else {
+      console.log('✅ Users table initialized successfully');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error initializing users table:', error);
+    console.warn('⚠️ Please create the users table manually in Supabase');
+  }
+};
+
+/**
  * Initialize storage buckets with proper Supabase limits (50MB max for free tier)
  */
 export const initializeStorageBuckets = async (): Promise<void> => {

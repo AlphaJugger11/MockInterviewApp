@@ -8,7 +8,8 @@ import compression from 'compression';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
 import interviewRoutes from './routes/interview';
-import { initializeStorageBuckets } from './services/supabaseService';
+import authRoutes from './routes/auth';
+import { initializeStorageBuckets, initializeUserTable } from './services/supabaseService';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -57,7 +58,8 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     port: PORT,
     cors: 'enabled',
-    supabase: 'configured'
+    supabase: 'configured',
+    authentication: 'enabled'
   });
 });
 
@@ -67,11 +69,13 @@ app.get('/api/test', (req, res) => {
     success: true,
     message: 'Backend is connected and working!',
     timestamp: new Date().toISOString(),
-    supabase: 'ready'
+    supabase: 'ready',
+    authentication: 'ready'
   });
 });
 
 // API routes
+app.use('/api/auth', authRoutes);
 app.use('/api/interview', interviewRoutes);
 
 // 404 handler
@@ -80,15 +84,16 @@ app.use(notFound);
 // Error handling middleware
 app.use(errorHandler);
 
-// Initialize Supabase Storage buckets
+// Initialize Supabase Storage buckets and user table
 const initializeSupabase = async () => {
   try {
-    console.log('🔧 Initializing Supabase Storage buckets...');
+    console.log('🔧 Initializing Supabase Storage buckets and user table...');
     await initializeStorageBuckets();
-    console.log('✅ Supabase Storage initialized successfully');
+    await initializeUserTable();
+    console.log('✅ Supabase initialized successfully');
   } catch (error) {
-    console.error('❌ Error initializing Supabase Storage:', error);
-    console.warn('⚠️ Server will continue without Supabase Storage');
+    console.error('❌ Error initializing Supabase:', error);
+    console.warn('⚠️ Server will continue without full Supabase functionality');
   }
 };
 
@@ -109,6 +114,7 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`🔗 Test endpoint: http://localhost:${PORT}/api/test`);
+  console.log(`🔐 Authentication endpoints: http://localhost:${PORT}/api/auth/*`);
   
   if (process.env.NODE_ENV !== 'production') {
     console.log(`🌐 CORS enabled for WebContainer URLs`);

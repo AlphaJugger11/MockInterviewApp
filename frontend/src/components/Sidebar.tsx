@@ -4,6 +4,10 @@ import { LayoutDashboard, Calendar, Settings, User } from 'lucide-react';
 
 const Sidebar = () => {
   const location = useLocation();
+  
+  // Get user data from localStorage
+  const userName = localStorage.getItem('userName') || 'User';
+  const userEmail = localStorage.getItem('userEmail') || '';
 
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -20,10 +24,10 @@ const Sidebar = () => {
           </div>
           <div>
             <h3 className="font-poppins font-semibold text-light-text-primary dark:text-dark-text-primary">
-              John Doe
+              {userName}
             </h3>
             <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-              Pro Plan
+              {userEmail ? userEmail.substring(0, 20) + (userEmail.length > 20 ? '...' : '') : 'Pro Plan'}
             </p>
           </div>
         </div>

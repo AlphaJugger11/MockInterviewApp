@@ -4,14 +4,17 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { 
   uploadRecording, 
   uploadTranscript, 
+  uploadUserTranscript,
   getSignedDownloadUrl, 
   listConversationFiles, 
   listUserTranscripts,
-  cleanupSession,
   deleteRecording,
+  deleteSessionTranscript,
+  cleanupSession,
   RECORDINGS_BUCKET, 
   TRANSCRIPTS_BUCKET,
-  USER_TRANSCRIPTS_BUCKET 
+  USER_TRANSCRIPTS_BUCKET,
+  supabase
 } from '../services/supabaseService';
 
 // Initialize Gemini AI
@@ -167,7 +170,7 @@ IMPORTANT REMINDERS:
 
     console.log("Final conversational context length:", conversationalContext.length);
 
-    // Step 4: Create conversation WITHOUT S3 recording
+    // Step 4: Create conversation WITHOUT S3 recording (enable_recording removed)
     console.log("Creating conversation WITHOUT S3 recording...");
     
     try {
@@ -181,7 +184,7 @@ IMPORTANT REMINDERS:
             max_call_duration: 1200, // 20 minutes max call duration
             participant_absent_timeout: 300, // 5 minutes timeout for participant absence
             participant_left_timeout: 15, // Set timeout after participant leaves
-            // NOTE: No S3 recording configuration - using client-side recording instead
+            // REMOVED: enable_recording and enable_transcription (no S3 bucket)
           }
         },
         {
@@ -211,7 +214,7 @@ IMPORTANT REMINDERS:
         conversationId: conversation_id,
         conversationalContext: conversationalContext,
         timestamp: new Date().toISOString(),
-        recordingMethod: 'client_side_only'
+        recordingMethod: 'client_side_only' // No S3 recording
       };
       
       console.log("Session data prepared:", {
@@ -229,14 +232,14 @@ IMPORTANT REMINDERS:
         success: true,
         conversation_url,
         conversation_id,
-        message: 'Interview conversation created successfully with client-side recording',
+        message: 'Interview conversation created successfully with client-side recording only',
         sessionData: {
           jobTitle: sessionData.jobTitle,
           userName: sessionData.userName,
           hasCustomInstructions: !!customInstructions,
           hasCustomCriteria: !!customCriteria,
           conversationId: conversation_id,
-          method: 'client_side_recording_only'
+          method: 'conversational_context_client_side_recording'
         }
       });
 
@@ -277,7 +280,7 @@ IMPORTANT REMINDERS:
               max_call_duration: 1200,
               participant_absent_timeout: 300,
               participant_left_timeout: 15,
-              // NOTE: No S3 recording configuration - using client-side recording instead
+              // REMOVED: enable_recording and enable_transcription (no S3 bucket)
             }
           },
           {
@@ -313,7 +316,7 @@ IMPORTANT REMINDERS:
           success: true,
           conversation_url,
           conversation_id,
-          message: 'Interview conversation created successfully with dynamic persona and client-side recording (fallback)',
+          message: 'Interview conversation created successfully with dynamic persona and client-side recording only (fallback)',
           sessionData: {
             jobTitle: sessionData.jobTitle,
             userName: sessionData.userName,
@@ -321,7 +324,7 @@ IMPORTANT REMINDERS:
             hasCustomCriteria: !!customCriteria,
             conversationId: conversation_id,
             dynamicPersonaId: dynamicPersonaId,
-            method: 'client_side_recording_only'
+            method: 'dynamic_persona_client_side_recording'
           }
         });
 
@@ -352,7 +355,7 @@ IMPORTANT REMINDERS:
   }
 };
 
-// Enhanced endpoint to get conversation data with VERBOSE MODE
+// ENHANCED: Get conversation data with VERBOSE MODE and transcript display
 export const getConversation = async (
   req: Request,
   res: Response,
@@ -409,10 +412,11 @@ export const getConversation = async (
       let transcriptEvents: any[] = [];
       
       // Use webhook transcript if available, otherwise use API response
-      const transcript = storedTranscript || conversationData.transcript;
+      const transcript = storedTranscript || conversationData.transcript || conversationData.events;
       
       if (transcript) {
         console.log('📝 Processing transcript:', typeof transcript);
+        console.log('📄 Raw transcript data:', JSON.stringify(transcript, null, 2));
         
         if (Array.isArray(transcript)) {
           // Handle array format from webhook or verbose API
@@ -421,7 +425,7 @@ export const getConversation = async (
             let participant = 'user';
             
             if (typeof item === 'object') {
-              content = item.content || item.text || item.message || '';
+              content = item.content || item.text || item.message || item.transcript || '';
               participant = item.role === 'assistant' || item.participant === 'ai' || item.speaker === 'assistant' ? 'ai' : 'user';
             } else if (typeof item === 'string') {
               content = item;
@@ -458,6 +462,15 @@ export const getConversation = async (
         
         console.log('📄 Formatted transcript length:', formattedTranscript.length);
         console.log('📊 Transcript events count:', transcriptEvents.length);
+        
+        // DISPLAY TRANSCRIPT IN TERMINAL
+        if (formattedTranscript) {
+          console.log('\n' + '='.repeat(80));
+          console.log('📝 CONVERSATION TRANSCRIPT:');
+          console.log('='.repeat(80));
+          console.log(formattedTranscript);
+          console.log('='.repeat(80) + '\n');
+        }
       } else {
         console.warn('⚠️ No transcript found in API response or webhook storage');
       }
@@ -515,6 +528,30 @@ export const conversationCallback = async (
       global.conversationTranscripts[conversation_id] = transcript;
       console.log('✅ Stored transcript for conversation:', conversation_id);
       
+      // DISPLAY TRANSCRIPT IN TERMINAL
+      if (transcript) {
+        console.log('\n' + '='.repeat(80));
+        console.log('📝 WEBHOOK TRANSCRIPT RECEIVED:');
+        console.log('='.repeat(80));
+        console.log(JSON.stringify(transcript, null, 2));
+        console.log('='.repeat(80) + '\n');
+      }
+      
+    } else if (event_type === 'application.recording_ready') {
+      const { recording_url, download_url } = properties;
+      
+      console.log('🎬 Recording ready for conversation:', conversation_id);
+      console.log('📹 Recording URL:', recording_url);
+      console.log('⬇️ Download URL:', download_url);
+      
+      // Store recording URLs for later access
+      global.conversationRecordings[conversation_id] = {
+        recording_url,
+        download_url,
+        timestamp: new Date().toISOString()
+      };
+      console.log('✅ Stored recording for conversation:', conversation_id);
+      
     } else if (event_type === 'system.shutdown') {
       console.log('🛑 Conversation ended:', conversation_id, 'Reason:', properties?.shutdown_reason);
       
@@ -533,14 +570,14 @@ export const conversationCallback = async (
   }
 };
 
-// Enhanced function to end conversation with session cleanup
+// Enhanced function to end conversation with user session management
 export const endConversation = async (
   req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { conversationId, dynamicPersonaId, userId, userName, transcript, jobTitle, company } = req.body;
+    const { conversationId, dynamicPersonaId, userId, transcript, jobTitle, company } = req.body;
     
     const TAVUS_API_KEY = process.env.TAVUS_API_KEY as string;
     
@@ -581,26 +618,32 @@ export const endConversation = async (
       
       // Also check webhook storage
       const storedTranscript = global.conversationTranscripts?.[conversationId];
+      const storedRecording = global.conversationRecordings?.[conversationId];
       
       if (storedTranscript) {
         conversationData.webhookTranscript = storedTranscript;
         console.log('📝 Found webhook transcript data');
       }
       
+      if (storedRecording) {
+        conversationData.webhookRecording = storedRecording;
+        console.log('🎬 Found webhook recording data');
+      }
+      
     } catch (dataError) {
       console.warn('⚠️ Error retrieving conversation data:', dataError);
     }
 
-    // Step 2: Session cleanup - save user transcript and delete temporary files
-    if (userId && userName && transcript && transcript.length > 0 && jobTitle) {
+    // Step 2: Perform session cleanup if userId provided
+    if (userId && transcript && transcript.length > 0) {
       try {
-        console.log('🧹 Starting session cleanup...');
+        const userName = req.body.userName || 'User';
         const cleanupResult = await cleanupSession(
           conversationId,
           userId,
           userName,
           transcript,
-          jobTitle,
+          jobTitle || 'Unknown Role',
           company
         );
         
@@ -667,7 +710,7 @@ export const endConversation = async (
     
     res.status(200).json({ 
       success: true,
-      message: 'Conversation and session cleanup completed successfully',
+      message: 'Conversation and persona cleanup completed successfully',
       conversationData: conversationData // Return the conversation data for frontend use
     });
 
@@ -680,7 +723,7 @@ export const endConversation = async (
   }
 };
 
-// Enhanced function to analyze interview using REAL conversation data
+// ENHANCED: Analyze interview using REAL conversation data with proper transcript analysis
 export const analyzeInterview = async (
   req: Request,
   res: Response,
@@ -735,11 +778,18 @@ export const analyzeInterview = async (
         
         // Check webhook storage first
         const storedTranscript = global.conversationTranscripts?.[conversationId];
-        const transcript_to_use = storedTranscript || conversationData.transcript;
+        const transcript_to_use = storedTranscript || conversationData.transcript || conversationData.events;
         
         if (transcript_to_use) {
           dataSource = 'real_conversation';
           console.log('✅ Using REAL conversation transcript from', storedTranscript ? 'webhook' : 'API');
+          
+          // DISPLAY REAL TRANSCRIPT IN TERMINAL FOR ANALYSIS
+          console.log('\n' + '='.repeat(80));
+          console.log('📝 REAL TRANSCRIPT FOR ANALYSIS:');
+          console.log('='.repeat(80));
+          console.log(JSON.stringify(transcript_to_use, null, 2));
+          console.log('='.repeat(80) + '\n');
           
           // Process transcript based on format
           if (Array.isArray(transcript_to_use)) {
@@ -774,8 +824,20 @@ export const analyzeInterview = async (
               .filter(answer => answer.length > 20);
           }
           
-          console.log('📄 Real transcript preview:', realTranscript.substring(0, 300) + '...');
+          console.log('📄 Real transcript preview:', realTranscript?.substring(0, 300) + '...');
           console.log('✅ Extracted', realAnswers.length, 'real answers from transcript');
+          
+          // DISPLAY EXTRACTED ANSWERS IN TERMINAL
+          if (realAnswers.length > 0) {
+            console.log('\n' + '='.repeat(80));
+            console.log('💬 EXTRACTED CANDIDATE ANSWERS:');
+            console.log('='.repeat(80));
+            realAnswers.forEach((answer, index) => {
+              console.log(`${index + 1}. ${answer}`);
+              console.log('-'.repeat(40));
+            });
+            console.log('='.repeat(80) + '\n');
+          }
         }
         
         if (conversationData.perception_analysis) {
@@ -831,6 +893,7 @@ INSTRUCTIONS:
 - Extract ACTUAL answers from the transcript, not generic ones
 - Use the real conversation content to provide accurate, specific feedback
 - If this is real conversation data, mention that the analysis is based on their actual interview
+- Focus on the actual questions asked and answers given in the transcript
 
 Please return ONLY a valid JSON object (no markdown formatting) with the following structure:
 {
@@ -1158,7 +1221,7 @@ export const getUserTranscripts = async (
       return;
     }
     
-    console.log('📋 Getting user transcripts for user:', userId);
+    console.log('📋 Getting user transcripts for:', userId);
     
     const files = await listUserTranscripts(userId);
     
@@ -1206,9 +1269,13 @@ export const deleteRecordingFile = async (
     
     console.log('🗑️ Cleaning up Supabase files for conversation:', conversationId);
     
-    const result = await deleteRecording(conversationId);
+    // Delete recordings
+    const recordingResult = await deleteRecording(conversationId);
     
-    if (result.success) {
+    // Delete session transcripts
+    const transcriptResult = await deleteSessionTranscript(conversationId);
+    
+    if (recordingResult.success && transcriptResult.success) {
       res.status(200).json({
         success: true,
         message: 'Supabase files cleaned up successfully'
@@ -1216,9 +1283,11 @@ export const deleteRecordingFile = async (
     } else {
       res.status(500).json({
         success: false,
-        error: result.error || 'Failed to cleanup files'
+        error: 'Failed to clean up some files'
       });
     }
+    
+    console.log('✅ Supabase files cleaned up successfully');
     
   } catch (error) {
     console.error('❌ Error in deleteRecordingFile:', error);

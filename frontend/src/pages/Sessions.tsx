@@ -1,49 +1,168 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, Filter, Eye } from 'lucide-react';
+import { Search, Filter, Eye, Download } from 'lucide-react';
 import Layout from '../components/Layout';
-import { mockSessions } from '../data/mockData';
+
+interface UserSession {
+  id: string;
+  role: string;
+  company: string;
+  date: string;
+  duration: string;
+  transcriptUrl?: string;
+  conversationId: string;
+}
 
 const Sessions = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortBy, setSortBy] = useState('date');
+  const [userSessions, setUserSessions] = useState<UserSession[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredSessions = mockSessions
+  // Get user data from localStorage
+  const userId = localStorage.getItem('userId');
+  const userName = localStorage.getItem('userName') || 'User';
+
+  useEffect(() => {
+    const loadUserSessions = async () => {
+      try {
+        setLoading(true);
+        
+        // Load sessions from localStorage (in a real app, this would come from the database)
+        const sessions: UserSession[] = [];
+        
+        // Check for stored session data
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('session_')) {
+            try {
+              const sessionData = JSON.parse(localStorage.getItem(key) || '{}');
+              if (sessionData.jobTitle && sessionData.userName) {
+                sessions.push({
+                  id: sessionData.conversationId || key.replace('session_', ''),
+                  role: sessionData.jobTitle,
+                  company: sessionData.company || 'Not specified',
+                  date: new Date(sessionData.endTime || sessionData.timestamp || Date.now()).toLocaleDateString(),
+                  duration: sessionData.duration ? `${Math.floor(sessionData.duration / 60)}:${(sessionData.duration % 60).toString().padStart(2, '0')}` : 'Unknown',
+                  conversationId: sessionData.conversationId || key.replace('session_', ''),
+                  transcriptUrl: sessionData.userTranscriptUrl
+                });
+              }
+            } catch (error) {
+              console.warn('Error parsing session data:', error);
+            }
+          }
+        }
+        
+        // Sort by date (newest first)
+        sessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+        setUserSessions(sessions);
+        console.log('📋 Loaded user sessions:', sessions);
+        
+      } catch (error) {
+        console.error('❌ Error loading user sessions:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUserSessions();
+  }, [userId]);
+
+  const filteredSessions = userSessions
     .filter(session => {
       const matchesSearch = session.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
                            session.company.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesFilter = filterStatus === 'all' || session.status === filterStatus;
-      return matchesSearch && matchesFilter;
+      return matchesSearch;
     })
     .sort((a, b) => {
       if (sortBy === 'date') {
         return new Date(b.date).getTime() - new Date(a.date).getTime();
-      } else if (sortBy === 'score') {
-        return b.score - a.score;
+      } else if (sortBy === 'role') {
+        return a.role.localeCompare(b.role);
       }
       return 0;
     });
 
-  const getScoreColor = (score: number) => {
-    if (score >= 85) return 'text-green-600 dark:text-green-400';
-    if (score >= 70) return 'text-yellow-600 dark:text-yellow-400';
-    return 'text-red-600 dark:text-red-400';
-  };
+  const downloadTranscript = async (session: UserSession) => {
+    try {
+      // Try to get transcript from localStorage first
+      const storedTranscript = localStorage.getItem(`transcript_${session.conversationId}`);
+      
+      if (storedTranscript) {
+        const transcriptData = JSON.parse(storedTranscript);
+        
+        if (transcriptData.length === 0) {
+          alert('No transcript data available for this session.');
+          return;
+        }
+        
+        // Format transcript for download
+        const formattedTranscript = transcriptData.map((event: any) => {
+          const speaker = event.participant === 'ai' ? 'Interviewer (Sarah)' : `Candidate (${userName})`;
+          const timestamp = new Date(event.timestamp).toLocaleTimeString();
+          return `[${timestamp}] ${speaker}: ${event.content}`;
+        }).join('\n\n');
+        
+        // Add header
+        const header = `INTERVIEW TRANSCRIPT
+===================
+Candidate: ${userName}
+Job Title: ${session.role}
+Company: ${session.company}
+Date: ${session.date}
+Duration: ${session.duration}
+Conversation ID: ${session.conversationId}
+Events Count: ${transcriptData.length}
 
-  const getStatusBadge = (status: string) => {
-    const baseClasses = 'px-2 py-1 rounded-full text-xs font-medium';
-    switch (status) {
-      case 'completed':
-        return `${baseClasses} bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400`;
-      case 'in-progress':
-        return `${baseClasses} bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400`;
-      case 'scheduled':
-        return `${baseClasses} bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400`;
-      default:
-        return `${baseClasses} bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400`;
+TRANSCRIPT:
+===========
+
+`;
+        
+        const fullTranscript = header + formattedTranscript;
+        
+        // Create and trigger download
+        const blob = new Blob([fullTranscript], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `interview-transcript-${session.role.replace(/\s+/g, '-')}-${session.date.replace(/\//g, '-')}.txt`;
+        link.style.display = 'none';
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Cleanup
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        
+        console.log('📄 Transcript download triggered successfully');
+      } else {
+        alert('No transcript data available for this session.');
+      }
+    } catch (error) {
+      console.error('❌ Error downloading transcript:', error);
+      alert('Error downloading transcript. Please try again.');
     }
   };
+
+  if (loading) {
+    return (
+      <Layout showSidebar>
+        <div className="p-8">
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <div className="w-8 h-8 border-4 border-light-accent dark:border-dark-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+              <p className="text-light-text-secondary dark:text-dark-text-secondary">Loading your sessions...</p>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout showSidebar>
@@ -53,7 +172,7 @@ const Sessions = () => {
             My Interview Sessions
           </h1>
           <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
-            Review and analyze your past interview performances.
+            Review your past interview transcripts and performance history.
           </p>
         </div>
 
@@ -72,21 +191,6 @@ const Sessions = () => {
               />
             </div>
 
-            {/* Status Filter */}
-            <div className="relative">
-              <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-light-text-secondary dark:text-dark-text-secondary" />
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="pl-10 pr-8 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent appearance-none cursor-pointer"
-              >
-                <option value="all">All Status</option>
-                <option value="completed">Completed</option>
-                <option value="in-progress">In Progress</option>
-                <option value="scheduled">Scheduled</option>
-              </select>
-            </div>
-
             {/* Sort */}
             <select
               value={sortBy}
@@ -94,7 +198,7 @@ const Sessions = () => {
               className="px-4 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent appearance-none cursor-pointer"
             >
               <option value="date">Sort by Date</option>
-              <option value="score">Sort by Score</option>
+              <option value="role">Sort by Role</option>
             </select>
           </div>
         </div>
@@ -115,12 +219,6 @@ const Sessions = () => {
                     Duration
                   </th>
                   <th className="px-6 py-4 text-left text-sm font-medium text-light-text-primary dark:text-dark-text-primary">
-                    Score
-                  </th>
-                  <th className="px-6 py-4 text-left text-sm font-medium text-light-text-primary dark:text-dark-text-primary">
-                    Status
-                  </th>
-                  <th className="px-6 py-4 text-left text-sm font-medium text-light-text-primary dark:text-dark-text-primary">
                     Actions
                   </th>
                 </tr>
@@ -139,33 +237,28 @@ const Sessions = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-light-text-primary dark:text-dark-text-primary">
-                      {new Date(session.date).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
+                      {session.date}
                     </td>
                     <td className="px-6 py-4 text-sm text-light-text-primary dark:text-dark-text-primary">
                       {session.duration}
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`text-lg font-bold ${getScoreColor(session.score)}`}>
-                        {session.score}%
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={getStatusBadge(session.status)}>
-                        {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <Link
-                        to={`/feedback/${session.id}`}
-                        className="inline-flex items-center px-3 py-1 bg-light-accent dark:bg-dark-accent text-white text-sm rounded-md hover:opacity-90 transition-opacity"
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        View Feedback
-                      </Link>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => downloadTranscript(session)}
+                          className="inline-flex items-center px-3 py-1 bg-light-accent dark:bg-dark-accent text-white text-sm rounded-md hover:opacity-90 transition-opacity"
+                        >
+                          <Download className="h-4 w-4 mr-1" />
+                          Download Transcript
+                        </button>
+                        <Link
+                          to={`/feedback/${session.id}`}
+                          className="inline-flex items-center px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:opacity-90 transition-opacity"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View Analysis
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -176,41 +269,58 @@ const Sessions = () => {
           {filteredSessions.length === 0 && (
             <div className="text-center py-12">
               <p className="text-light-text-secondary dark:text-dark-text-secondary">
-                No sessions found matching your criteria.
+                {userSessions.length === 0 
+                  ? "No interview sessions found. Start your first interview to see it here!"
+                  : "No sessions found matching your search criteria."
+                }
               </p>
+              {userSessions.length === 0 && (
+                <Link
+                  to="/setup"
+                  className="inline-flex items-center mt-4 px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity"
+                >
+                  Start Your First Interview
+                </Link>
+              )}
             </div>
           )}
         </div>
 
         {/* Sessions Summary */}
-        <div className="mt-8 grid md:grid-cols-3 gap-6">
-          <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border text-center">
-            <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
-              Total Sessions
-            </h3>
-            <p className="text-3xl font-bold text-light-accent dark:text-dark-accent">
-              {mockSessions.length}
-            </p>
-          </div>
+        {userSessions.length > 0 && (
+          <div className="mt-8 grid md:grid-cols-3 gap-6">
+            <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border text-center">
+              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
+                Total Sessions
+              </h3>
+              <p className="text-3xl font-bold text-light-accent dark:text-dark-accent">
+                {userSessions.length}
+              </p>
+            </div>
 
-          <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border text-center">
-            <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
-              Average Score
-            </h3>
-            <p className="text-3xl font-bold text-light-accent dark:text-dark-accent">
-              {Math.round(mockSessions.reduce((acc, session) => acc + session.score, 0) / mockSessions.length)}%
-            </p>
-          </div>
+            <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border text-center">
+              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
+                Most Recent
+              </h3>
+              <p className="text-lg font-bold text-light-accent dark:text-dark-accent">
+                {userSessions[0]?.role || 'None'}
+              </p>
+            </div>
 
-          <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border text-center">
-            <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
-              Best Score
-            </h3>
-            <p className="text-3xl font-bold text-light-accent dark:text-dark-accent">
-              {Math.max(...mockSessions.map(s => s.score))}%
-            </p>
+            <div className="bg-light-secondary dark:bg-dark-secondary p-6 rounded-xl border border-light-border dark:border-dark-border text-center">
+              <h3 className="font-poppins font-semibold text-lg text-light-text-primary dark:text-dark-text-primary mb-2">
+                This Month
+              </h3>
+              <p className="text-3xl font-bold text-light-accent dark:text-dark-accent">
+                {userSessions.filter(session => {
+                  const sessionDate = new Date(session.date);
+                  const now = new Date();
+                  return sessionDate.getMonth() === now.getMonth() && sessionDate.getFullYear() === now.getFullYear();
+                }).length}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </Layout>
   );

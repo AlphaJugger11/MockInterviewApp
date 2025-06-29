@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, User } from 'lucide-react';
 import Layout from '../components/Layout';
 
 const Auth = () => {
@@ -8,12 +8,51 @@ const Auth = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate successful authentication
-    navigate('/dashboard');
+    setLoading(true);
+    setError(null);
+
+    try {
+      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+      const payload = isLogin 
+        ? { email: email.trim(), password }
+        : { email: email.trim(), password, name: name.trim() };
+
+      console.log('🔐 Attempting authentication:', { endpoint, email: email.trim(), isLogin });
+
+      const response = await fetch(`http://localhost:3001${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        // Store user data and token
+        localStorage.setItem('authToken', data.token);
+        localStorage.setItem('userId', data.user.id);
+        localStorage.setItem('userEmail', data.user.email);
+        localStorage.setItem('userName', data.user.name);
+        
+        console.log('✅ Authentication successful:', data.user);
+        navigate('/dashboard');
+      } else {
+        setError(data.error || 'Authentication failed');
+        console.error('❌ Authentication failed:', data.error);
+      }
+    } catch (err) {
+      console.error('❌ Authentication error:', err);
+      setError('Network error. Please check if the backend server is running.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -30,7 +69,36 @@ const Auth = () => {
           </div>
 
           <div className="bg-light-secondary dark:bg-dark-secondary p-8 rounded-2xl border border-light-border dark:border-dark-border">
+            {error && (
+              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+              </div>
+            )}
+
             <form className="space-y-6" onSubmit={handleSubmit}>
+              {!isLogin && (
+                <div>
+                  <label htmlFor="name" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
+                    Full Name
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <User className="h-5 w-5 text-light-text-secondary dark:text-dark-text-secondary" />
+                    </div>
+                    <input
+                      id="name"
+                      name="name"
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="block w-full pl-10 pr-3 py-3 border border-light-border dark:border-dark-border rounded-lg bg-light-primary dark:bg-dark-primary text-light-text-primary dark:text-dark-text-primary placeholder-light-text-secondary dark:placeholder-dark-text-secondary focus:outline-none focus:ring-2 focus:ring-light-accent dark:focus:ring-dark-accent focus:border-transparent"
+                      placeholder="Enter your full name"
+                      required={!isLogin}
+                    />
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label htmlFor="email" className="block text-sm font-medium text-light-text-primary dark:text-dark-text-primary mb-2">
                   Email address
@@ -86,9 +154,10 @@ const Auth = () => {
 
               <button
                 type="submit"
-                className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-light-accent dark:bg-dark-accent hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-light-accent dark:focus:ring-dark-accent transition-opacity"
+                disabled={loading}
+                className="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-light-accent dark:bg-dark-accent hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-light-accent dark:focus:ring-dark-accent transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isLogin ? 'Sign in' : 'Create account'}
+                {loading ? 'Please wait...' : (isLogin ? 'Sign in' : 'Create account')}
               </button>
 
               <div className="relative">
