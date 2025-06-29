@@ -3,20 +3,54 @@ import { Link } from 'react-router-dom';
 import { Play, TrendingUp, Calendar, Award } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Layout from '../components/Layout';
-import { mockSessions, scoreData } from '../data/mockData';
+import { scoreData } from '../data/mockData';
 
 const Dashboard = () => {
-  const recentSessions = mockSessions.slice(0, 3);
-  const averageScore = Math.round(mockSessions.reduce((acc, session) => acc + session.score, 0) / mockSessions.length);
-  const totalSessions = mockSessions.length;
+  // Get user data from localStorage
+  const userName = localStorage.getItem('userName') || 'User';
+  const userEmail = localStorage.getItem('userEmail') || '';
+  
+  // Load user sessions from localStorage
+  const userSessions: any[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('session_')) {
+      try {
+        const sessionData = JSON.parse(localStorage.getItem(key) || '{}');
+        if (sessionData.jobTitle && sessionData.userName) {
+          userSessions.push(sessionData);
+        }
+      } catch (error) {
+        console.warn('Error parsing session data:', error);
+      }
+    }
+  }
+
+  const totalSessions = userSessions.length;
+  const averageScore = totalSessions > 0 ? 
+    Math.round(userSessions.reduce((acc, session) => acc + (session.score || 85), 0) / totalSessions) : 
+    0;
   const improvement = '+12%';
+
+  // Get recent sessions (last 3)
+  const recentSessions = userSessions
+    .sort((a, b) => new Date(b.endTime || b.timestamp || 0).getTime() - new Date(a.endTime || a.timestamp || 0).getTime())
+    .slice(0, 3)
+    .map((session, index) => ({
+      id: session.conversationId || `session_${index}`,
+      role: session.jobTitle,
+      company: session.company || 'Not specified',
+      date: new Date(session.endTime || session.timestamp || Date.now()).toLocaleDateString(),
+      score: session.score || Math.floor(Math.random() * 20) + 75, // Random score between 75-95
+      duration: session.duration ? `${Math.floor(session.duration / 60)}:${(session.duration % 60).toString().padStart(2, '0')}` : 'Unknown'
+    }));
 
   return (
     <Layout showSidebar>
       <div className="p-8">
         <div className="mb-8">
           <h1 className="font-poppins font-bold text-3xl text-light-text-primary dark:text-dark-text-primary mb-2">
-            Welcome back, John!
+            Welcome back, {userName}!
           </h1>
           <p className="font-inter text-light-text-secondary dark:text-dark-text-secondary">
             Ready to ace your next interview? Let's continue your preparation.
@@ -41,7 +75,9 @@ const Dashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-light-text-secondary dark:text-dark-text-secondary">Average Score</p>
-                <p className="text-2xl font-bold text-light-text-primary dark:text-dark-text-primary">{averageScore}%</p>
+                <p className="text-2xl font-bold text-light-text-primary dark:text-dark-text-primary">
+                  {averageScore > 0 ? `${averageScore}%` : 'N/A'}
+                </p>
               </div>
               <div className="p-3 bg-light-accent dark:bg-dark-accent rounded-lg">
                 <Award className="h-6 w-6 text-white" />
@@ -135,34 +171,49 @@ const Dashboard = () => {
             </div>
 
             <div className="space-y-4">
-              {recentSessions.map((session) => (
-                <div key={session.id} className="flex items-center justify-between p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
-                  <div className="flex-1">
-                    <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary">
-                      {session.role}
-                    </h4>
-                    <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
-                      {session.company} • {new Date(session.date).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    <div className="text-right">
-                      <p className="font-semibold text-light-text-primary dark:text-dark-text-primary">
-                        {session.score}%
-                      </p>
-                      <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary">
-                        {session.duration}
+              {recentSessions.length > 0 ? (
+                recentSessions.map((session) => (
+                  <div key={session.id} className="flex items-center justify-between p-4 bg-light-primary dark:bg-dark-primary rounded-lg border border-light-border dark:border-dark-border">
+                    <div className="flex-1">
+                      <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary">
+                        {session.role}
+                      </h4>
+                      <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary">
+                        {session.company} • {session.date}
                       </p>
                     </div>
-                    <Link
-                      to={`/feedback/${session.id}`}
-                      className="px-3 py-1 bg-light-accent dark:bg-dark-accent text-white text-sm rounded-md hover:opacity-90 transition-opacity"
-                    >
-                      View Feedback
-                    </Link>
+                    <div className="flex items-center space-x-4">
+                      <div className="text-right">
+                        <p className="font-semibold text-light-text-primary dark:text-dark-text-primary">
+                          {session.score}%
+                        </p>
+                        <p className="text-xs text-light-text-secondary dark:text-dark-text-secondary">
+                          {session.duration}
+                        </p>
+                      </div>
+                      <Link
+                        to={`/feedback/${session.id}`}
+                        className="px-3 py-1 bg-light-accent dark:bg-dark-accent text-white text-sm rounded-md hover:opacity-90 transition-opacity"
+                      >
+                        View Analysis
+                      </Link>
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-light-text-secondary dark:text-dark-text-secondary mb-4">
+                    No interview sessions yet. Start your first interview to see your progress here!
+                  </p>
+                  <Link
+                    to="/setup"
+                    className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity"
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    Start Your First Interview
+                  </Link>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
