@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Share2, Play, TrendingUp, Eye, Mic, MessageSquare, Download } from 'lucide-react';
+import { ArrowLeft, Share2, Play, TrendingUp, Eye, Mic, MessageSquare, Download, Cloud, ExternalLink } from 'lucide-react';
 import Layout from '../components/Layout';
+import { getConversationDownloadUrls } from '../services/supabaseClient';
 
 interface AnalysisData {
   overallScore: number;
@@ -32,6 +33,10 @@ const Feedback = () => {
   const [error, setError] = useState<string | null>(null);
   const [localRecordingUrl, setLocalRecordingUrl] = useState<string | null>(null);
   const [recordingMetadata, setRecordingMetadata] = useState<any>(null);
+  const [supabaseUrls, setSupabaseUrls] = useState<{
+    recordings: string[];
+    transcripts: string[];
+  }>({ recordings: [], transcripts: [] });
 
   // Get session data from localStorage
   const sessionData = {
@@ -188,8 +193,8 @@ const Feedback = () => {
       }
     };
 
-    // Load local recording if available
-    const loadLocalRecording = async () => {
+    // Load local recording and Supabase URLs
+    const loadRecordingData = async () => {
       // Check localStorage for local recording
       const storedRecording = localStorage.getItem(`local_recording_${sessionData.conversationId}`);
       const storedMetadata = localStorage.getItem(`local_recording_${sessionData.conversationId}_metadata`);
@@ -200,13 +205,25 @@ const Feedback = () => {
       }
       
       if (storedMetadata) {
-        setRecordingMetadata(JSON.parse(storedMetadata));
-        console.log('✅ Loaded recording metadata:', JSON.parse(storedMetadata));
+        const metadata = JSON.parse(storedMetadata);
+        setRecordingMetadata(metadata);
+        console.log('✅ Loaded recording metadata:', metadata);
+      }
+
+      // Load Supabase URLs
+      if (sessionData.conversationId) {
+        try {
+          const urls = await getConversationDownloadUrls(sessionData.conversationId);
+          setSupabaseUrls(urls);
+          console.log('✅ Loaded Supabase download URLs:', urls);
+        } catch (error) {
+          console.warn('⚠️ Could not load Supabase URLs:', error);
+        }
       }
     };
 
     fetchAnalysis();
-    loadLocalRecording();
+    loadRecordingData();
   }, [id, sessionData.role, sessionData.userName, sessionData.conversationId]);
 
   const renderCircularProgress = (value: number, size: 'small' | 'large' = 'large') => {
@@ -264,7 +281,7 @@ const Feedback = () => {
       }
     } else {
       console.warn('⚠️ No recording URL available');
-      alert('No recording available. The session may not have been recorded properly.');
+      alert('No local recording available. Check Supabase Storage for cloud backup.');
     }
   };
 
@@ -280,7 +297,7 @@ const Feedback = () => {
       
       if (transcriptData.length === 0) {
         console.warn('⚠️ Transcript is empty');
-        alert('No transcript data available. The conversation may not have been recorded properly.');
+        alert('No transcript data available. Check Supabase Storage for cloud backup.');
         return;
       }
       
@@ -321,8 +338,18 @@ TRANSCRIPT:
       console.log('📄 Transcript downloaded successfully');
     } else {
       console.warn('⚠️ No transcript data available for download');
-      alert('No transcript data available. The conversation may not have been recorded properly.');
+      alert('No transcript data available. Check Supabase Storage for cloud backup.');
     }
+  };
+
+  const openSupabaseRecording = (url: string) => {
+    window.open(url, '_blank');
+    console.log('☁️ Opened Supabase recording URL');
+  };
+
+  const openSupabaseTranscript = (url: string) => {
+    window.open(url, '_blank');
+    console.log('☁️ Opened Supabase transcript URL');
   };
 
   const renderTabContent = () => {
@@ -352,7 +379,7 @@ TRANSCRIPT:
           <div className="space-y-6">
             <div className="bg-light-secondary dark:bg-dark-secondary rounded-xl p-6 border border-light-border dark:border-dark-border">
               <h3 className="font-poppins font-semibold text-xl text-light-text-primary dark:text-dark-text-primary mb-4">
-                Session Recording
+                Session Recording & Storage
               </h3>
               <div className="bg-black rounded-lg aspect-video flex items-center justify-center mb-4">
                 {localRecordingUrl ? (
@@ -369,7 +396,7 @@ TRANSCRIPT:
                     <p className="text-white/70">Interview Recording</p>
                     <p className="text-white/50 text-sm mt-2">
                       {sessionData.sessionCompleted 
-                        ? 'Local recording not available - check downloads folder' 
+                        ? 'Local recording not available - check Supabase Storage below' 
                         : 'Recording in progress'
                       }
                     </p>
@@ -384,23 +411,77 @@ TRANSCRIPT:
                 )}
               </div>
               
-              <div className="flex space-x-4">
-                <button 
-                  onClick={downloadRecording}
-                  className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  {localRecordingUrl ? 'Download Recording' : 'Recording Not Available'}
-                </button>
-                
-                <button 
-                  onClick={downloadTranscript}
-                  className="inline-flex items-center px-4 py-2 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download Transcript
-                </button>
-                
+              {/* Local Downloads */}
+              <div className="mb-6">
+                <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-3">Local Downloads</h4>
+                <div className="flex flex-wrap gap-3">
+                  <button 
+                    onClick={downloadRecording}
+                    className="inline-flex items-center px-4 py-2 bg-light-accent dark:bg-dark-accent text-white rounded-lg hover:opacity-90 transition-opacity"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    {localRecordingUrl ? 'Download Local Recording' : 'Local Recording Not Available'}
+                  </button>
+                  
+                  <button 
+                    onClick={downloadTranscript}
+                    className="inline-flex items-center px-4 py-2 border border-light-border dark:border-dark-border text-light-text-primary dark:text-dark-text-primary rounded-lg hover:bg-light-primary dark:hover:bg-dark-primary transition-colors"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download Transcript
+                  </button>
+                </div>
+              </div>
+
+              {/* Supabase Cloud Storage */}
+              {(supabaseUrls.recordings.length > 0 || supabaseUrls.transcripts.length > 0) && (
+                <div className="mb-6">
+                  <h4 className="font-medium text-light-text-primary dark:text-dark-text-primary mb-3 flex items-center">
+                    <Cloud className="h-4 w-4 mr-2" />
+                    Supabase Cloud Storage
+                  </h4>
+                  <div className="space-y-3">
+                    {supabaseUrls.recordings.length > 0 && (
+                      <div>
+                        <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary mb-2">Recordings:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {supabaseUrls.recordings.map((url, index) => (
+                            <button
+                              key={index}
+                              onClick={() => openSupabaseRecording(url)}
+                              className="inline-flex items-center px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 transition-colors"
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              Recording {index + 1}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {supabaseUrls.transcripts.length > 0 && (
+                      <div>
+                        <p className="text-sm text-light-text-secondary dark:text-dark-text-secondary mb-2">Transcripts:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {supabaseUrls.transcripts.map((url, index) => (
+                            <button
+                              key={index}
+                              onClick={() => openSupabaseTranscript(url)}
+                              className="inline-flex items-center px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:bg-green-600 transition-colors"
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              Transcript {index + 1}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Share Button */}
+              <div>
                 <button className="inline-flex items-center px-4 py-2 bg-green-500 text-white rounded-lg hover:opacity-90 transition-opacity">
                   <Share2 className="h-4 w-4 mr-2" />
                   Share for Mentor Review
